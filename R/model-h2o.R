@@ -20,7 +20,20 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
         activation <- "Rectifier"
     }
 
-    # Input normalization parameters: mean (sub) and 1/sd (mul)
+    # Maxout uses a sub-unit max-pooling architecture that cannot be expressed
+    # as a single SQL expression per neuron.  Detect early and raise a clear error.
+    if (activation %in% c("Maxout", "MaxoutWithDropout")) {
+        cli::cli_abort(c(
+            "orbital does not yet support the {.val {activation}} activation in H2O DeepLearning models.",
+            "i" = paste0(
+                "Maxout uses a grouped max-pooling architecture (max over k sub-units per neuron) ",
+                "that requires special SQL handling beyond the current implementation."
+            ),
+            "i" = "For orbital-compatible H2O models use {.val Rectifier}, {.val Tanh}, or {.val Sigmoid}.",
+            "i" = "Full Maxout support is tracked at {.url https://github.com/davidrsch/orbital/issues/13}."
+        ))
+    }
+
     # These are NULL when standardize = FALSE was used during training
     norm_sub <- x@model$input_norm_sub
     norm_mul <- x@model$input_norm_mul

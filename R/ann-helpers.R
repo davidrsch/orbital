@@ -43,8 +43,10 @@ activation_expr <- function(activation, x_expr) {
         "rrelu" = glue::glue(
             "dplyr::if_else({x_expr} >= 0, {x_expr}, 0.22916666666666666 * {x_expr})"
         ),
-        "silu" = glue::glue("{x_expr} * (1 / (1 + exp(-({x_expr}))))"),
+        "silu" = ,
+        "swish" = glue::glue("{x_expr} * (1 / (1 + exp(-({x_expr}))))"),
         "softplus" = glue::glue("log(1 + exp({x_expr}))"),
+        "mish" = glue::glue("{x_expr} * tanh(log(1 + exp({x_expr})))"),
         "softshrink" = glue::glue(
             "dplyr::if_else({x_expr} > 0.5, {x_expr} - 0.5, dplyr::if_else({x_expr} < -0.5, {x_expr} + 0.5, 0))"
         ),

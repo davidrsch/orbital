@@ -85,6 +85,71 @@ tibble::tribble(
   )
 ```
 
+## Artificial Neural Networks (MLP models)
+
+orbital translates `mlp()` models from nnet, brulee, keras, keras3, kerasnip, and H2O
+to SQL by unrolling every weight matrix and activation function into a chain of
+SQL column expressions.
+
+### Supported activations
+
+All standard activations from PyTorch / brulee are supported, including `relu`,
+`tanh`, `sigmoid`, `elu`, `selu`, `gelu`, `leaky_relu`, `softplus`, `silu`/`swish`,
+and `mish`. See `orbital:::activation_expr()` for the full list.
+
+### Probability output
+
+For binary and multiclass MLP models orbital produces both class predictions and
+per-class probability columns when you pass `type = "prob"` (or
+`type = c("class", "prob")`):
+
+```r
+orb <- orbital(fit, type = "prob")
+predict(orb, new_data)
+#> # A tibble: 32 × 2
+#>    .pred_0 .pred_1
+#>      <dbl>   <dbl>
+#>  1   0.621   0.379
+#>  ...
+```
+
+For multiclass softmax models the probability expressions include the
+`exp(logit) / sum(exp(logits))` normalisation.
+
+### Keras Functional API (skip connections)
+
+Sequential and linear Functional API models work out of the box.
+Functional models that use `Add` layers (residual / skip connections) are
+also supported — orbital detects the merge layers, parses the model config,
+and generates the appropriate element-wise addition expressions.
+
+```r
+# Residual model — works
+inp <- keras3::keras_input(shape = 4)
+x   <- keras3::layer_dense(inp, 4, activation = "relu")
+out <- keras3::layer_add(list(x, inp)) |>   # residual
+          keras3::layer_dense(1)
+model <- keras3::keras_model(inp, out)
+orbital(model, mode = "regression", feature_names = paste0("x", 1:4))
+```
+
+### Caveats and recommendations
+
+**SQL expression length** Deep networks (6+ hidden layers, 100+ units per layer)
+generate very long SQL strings.  Some databases limit query length or query-plan
+depth.  For very deep networks, consider materializing intermediate layer outputs
+into temporary tables rather than executing one monolithic query.
+
+**Runtime dependencies** keras and H2O models require a live Python / JVM
+process to *fit* the model.  orbital only handles the *prediction* translation;
+no Python/JVM process is needed at inference time once the orbital object is
+created.
+
+**H2O Maxout** The Maxout activation uses a grouped max-pooling architecture
+that orbital does not yet support.  A call to `orbital()` on an H2O model trained
+with `activation = "Maxout"` raises an informative error.  Use `Rectifier`,
+`Tanh`, or `Sigmoid` for orbital-compatible H2O models.
+
 ## Recipes steps
 
 ```{r}

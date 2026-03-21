@@ -1,5 +1,262 @@
 # orbital methods for all keras-based models (legacy keras R package and keras3/kerasnip)
 
+# Internal: parse inbound layer names from one layer's config entry.
+# Handles keras3 new format ({args: [{keras_history: ["name", 0, 0]}]})
+# and old keras format ([[["name", 0, 0], ...]]).
+.keras_parse_inbound <- function(layer_cfg) {
+    nodes <- layer_cfg[["inbound_nodes"]]
+    if (is.null(nodes) || length(nodes) == 0L) {
+        return(character(0L))
+    }
+
+    first_node <- nodes[[1L]]
+
+    # keras3 format: first_node = list(args = list(...), kwargs = list())
+    args <- first_node[["args"]]
+    if (!is.null(args) && is.list(args)) {
+        res <- vapply(
+            args,
+            function(arg) {
+                hist <- arg[["keras_history"]]
+                if (is.null(hist)) {
+                    return(NA_character_)
+                }
+                lyr <- hist[[1L]]
+                if (is.character(lyr)) {
+                    lyr
+                } else {
+                    tryCatch(lyr$name, error = function(e) {
+                        as.character(lyr)[1L]
+                    })
+                }
+            },
+            character(1L)
+        )
+        return(res[!is.na(res)])
+    }
+
+    # Old keras format: first_node is a list of [layer_name, node_idx, tensor_idx] triples
+    if (
+        is.list(first_node) &&
+            length(first_node) > 0L &&
+            is.list(first_node[[1L]])
+    ) {
+        return(vapply(
+            first_node,
+            function(spec) {
+                n <- spec[[1L]]
+                if (is.character(n)) n else as.character(n)[1L]
+            },
+            character(1L)
+        ))
+    }
+
+    character(0L)
+}
+
+
+# Internal: topological/DAG traversal for Functional API models with merge layers.
+orbital_keras_dag_impl <- function(
+    x,
+    mode,
+    type,
+    lvl,
+    prefix,
+    feature_names,
+    all_weights,
+    all_layers
+) {
+    # Build Dense weight map: layer_name → list(kernel, bias)
+    dense_count <- 0L
+    weight_map <- list()
+    for (l in all_layers) {
+        if (grepl("dense", tolower(class(l)[1L]))) {
+            dense_count <- dense_count + 1L
+            weight_map[[l$name]] <- list(
+                kernel = t(all_weights[[2L * dense_count - 1L]]),
+                bias = as.numeric(all_weights[[2L * dense_count]])
+            )
+        }
+    }
+    last_dense <- if (length(weight_map) > 0L) {
+        tail(names(weight_map), 1L)
+    } else {
+        ""
+    }
+
+    n_in <- ncol(all_weights[[1L]])
+    input_names <- if (!is.null(feature_names)) {
+        feature_names
+    } else {
+        paste0("orbital_feature_", seq_len(n_in))
+    }
+
+    # Parse layer topology from model config
+    cfg <- tryCatch(x$get_config(), error = function(e) NULL)
+    layers_cfg <- if (!is.null(cfg)) {
+        if (!is.null(cfg$config) && !is.null(cfg$config$layers)) {
+            cfg$config$layers
+        } else if (!is.null(cfg$layers)) {
+            cfg$layers
+        } else {
+            list()
+        }
+    } else {
+        list()
+    }
+
+    topo_map <- vector("list", length(layers_cfg))
+    for (k in seq_along(layers_cfg)) {
+        lc <- layers_cfg[[k]]
+        lname <- tryCatch(
+            {
+                n <- if (!is.null(lc$config) && !is.null(lc$config$name)) {
+                    lc$config$name
+                } else {
+                    lc$name
+                }
+                as.character(n)[1L]
+            },
+            error = function(e) ""
+        )
+        if (nzchar(lname)) {
+            topo_map[[lname]] <- .keras_parse_inbound(lc)
+        }
+    }
+
+    # Expression register: layer_name → character vector of expression names
+    expr_reg <- new.env(hash = TRUE, parent = emptyenv())
+    all_exprs <- list()
+    out_pre_act <- NULL
+
+    for (l in all_layers) {
+        cls_orig <- class(l)[1L]
+        cls <- tolower(cls_orig)
+        lname <- l$name
+
+        if (grepl("input", cls)) {
+            assign(lname, input_names, envir = expr_reg)
+        } else if (grepl("dense", cls)) {
+            inbound <- topo_map[[lname]]
+            if (is.null(inbound) || length(inbound) < 1L) {
+                cli::cli_abort(
+                    "Dense layer {.val {lname}} has no inbound connections in model config."
+                )
+            }
+            in_names <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+            wt <- weight_map[[lname]]
+            pre_act <- build_mlp_pre_act(wt$kernel, wt$bias, in_names)
+
+            activation <- tryCatch(
+                {
+                    act <- l$get_config()$activation
+                    if (is.list(act)) {
+                        act <- act$class_name
+                    }
+                    tolower(as.character(act)[1L])
+                },
+                error = function(e) "linear"
+            )
+            if (is.null(activation) || !nzchar(activation)) {
+                activation <- "linear"
+            }
+
+            if (lname == last_dense) {
+                out_pre_act <- pre_act
+            } else {
+                act_exprs <- vapply(
+                    pre_act,
+                    function(z) activation_expr(activation, z),
+                    character(1)
+                )
+                unit_names <- paste0(
+                    "orbital_mlp_",
+                    lname,
+                    "_h",
+                    seq_along(act_exprs)
+                )
+                all_exprs[[lname]] <- stats::setNames(act_exprs, unit_names)
+                assign(lname, unit_names, envir = expr_reg)
+            }
+        } else if (grepl("\\badd\\b", cls, perl = TRUE)) {
+            # Element-wise Add: supports skip / residual connections
+            inbound <- topo_map[[lname]]
+            if (is.null(inbound) || length(inbound) != 2L) {
+                cli::cli_abort(
+                    "Keras Add layer {.val {lname}} must have exactly 2 inbound inputs, got {length(inbound)}."
+                )
+            }
+            exprs_a <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+            exprs_b <- get(inbound[2L], envir = expr_reg, inherits = FALSE)
+            if (length(exprs_a) != length(exprs_b)) {
+                cli::cli_abort(
+                    "Keras Add layer {.val {lname}}: both inputs must have the same width ({length(exprs_a)} vs {length(exprs_b)})."
+                )
+            }
+            add_names <- paste0("orbital_", lname, "_h", seq_along(exprs_a))
+            add_exprs <- paste0(
+                "(",
+                backtick(exprs_a),
+                " + ",
+                backtick(exprs_b),
+                ")"
+            )
+            all_exprs[[lname]] <- stats::setNames(add_exprs, add_names)
+            assign(lname, add_names, envir = expr_reg)
+        } else if (
+            grepl("dropout|flatten|reshape|activation|batchnorm|layernorm", cls)
+        ) {
+            # Inference-transparent pass-through layers
+            inbound <- topo_map[[lname]]
+            if (
+                !is.null(inbound) &&
+                    length(inbound) >= 1L &&
+                    exists(inbound[1L], envir = expr_reg, inherits = FALSE)
+            ) {
+                assign(
+                    lname,
+                    get(inbound[1L], envir = expr_reg, inherits = FALSE),
+                    envir = expr_reg
+                )
+            }
+        } else {
+            cli::cli_abort(c(
+                "Unsupported layer type in Keras Functional model: {.cls {cls_orig}}.",
+                "i" = "orbital supports: Dense, Add, Dropout, Flatten, Reshape, Activation.",
+                "i" = "Please file an issue: {.url https://github.com/davidrsch/orbital/issues/14}"
+            ))
+        }
+    }
+
+    if (is.null(out_pre_act)) {
+        cli::cli_abort(
+            "Could not identify the output Dense layer in the Keras model."
+        )
+    }
+
+    hidden_exprs <- unlist(all_exprs, use.names = TRUE)
+    n_out <- length(out_pre_act)
+
+    if (mode == "regression") {
+        c(hidden_exprs, stats::setNames(out_pre_act[1L], prefix))
+    } else if (n_out == 1L) {
+        c(
+            hidden_exprs,
+            binary_from_prob(
+                activation_expr("sigmoid", out_pre_act[1L]),
+                type,
+                lvl
+            )
+        )
+    } else {
+        c(
+            hidden_exprs,
+            multiclass_from_logits(stats::setNames(out_pre_act, lvl), type, lvl)
+        )
+    }
+}
+
+
 orbital_keras_impl <- function(
     x,
     mode,
@@ -9,20 +266,49 @@ orbital_keras_impl <- function(
     feature_names = NULL
 ) {
     all_weights <- x$get_weights()
-    n_dense <- length(all_weights) / 2L # each Dense layer has kernel + bias
+    all_layers <- x$layers
 
-    # Get all Dense layers for activation introspection
-    dense_layers <- Filter(
-        function(l) grepl("dense", tolower(class(l)[1])),
-        x$layers
+    # Detect merge layers (Add, Concatenate, etc.) that require DAG traversal.
+    non_linear_layers <- Filter(
+        function(l) {
+            cls <- tolower(class(l)[1L])
+            grepl("\\badd\\b|concatenate", cls, perl = TRUE) &&
+                !grepl(
+                    "dense|input|batchnorm|layernorm|flatten|reshape|activation|dropout",
+                    cls
+                )
+        },
+        all_layers
     )
 
-    # Input names
+    if (length(non_linear_layers) > 0L) {
+        return(
+            orbital_keras_dag_impl(
+                x,
+                mode,
+                type,
+                lvl,
+                prefix,
+                feature_names,
+                all_weights,
+                all_layers
+            )
+        )
+    }
+
+    # Linear model: optimised sequential traversal (no topology introspection needed)
+    n_dense <- length(all_weights) / 2L # each Dense layer has kernel + bias
+
+    dense_layers <- Filter(
+        function(l) grepl("dense", tolower(class(l)[1L])),
+        all_layers
+    )
+
     n_in <- ncol(all_weights[[1L]])
-    if (is.null(feature_names)) {
-        input_names <- paste0("orbital_feature_", seq_len(n_in))
+    input_names <- if (!is.null(feature_names)) {
+        feature_names
     } else {
-        input_names <- feature_names
+        paste0("orbital_feature_", seq_len(n_in))
     }
 
     all_exprs <- list()
@@ -32,7 +318,6 @@ orbital_keras_impl <- function(
         kernel <- t(all_weights[[2L * i - 1L]]) # (n_out_i x n_in_i)
         bias <- as.numeric(all_weights[[2L * i]])
 
-        # Get activation for this layer from config
         activation <- tryCatch(
             {
                 cfg <- dense_layers[[i]]$get_config()
@@ -44,14 +329,13 @@ orbital_keras_impl <- function(
             },
             error = function(e) "linear"
         )
-        if (is.null(activation) || activation == "") {
+        if (is.null(activation) || !nzchar(activation)) {
             activation <- "linear"
         }
 
         pre_act <- build_mlp_pre_act(kernel, bias, current_names)
 
         if (i < n_dense) {
-            # Hidden layer: apply activation
             act_exprs <- vapply(
                 pre_act,
                 function(z) activation_expr(activation, z),
@@ -66,7 +350,6 @@ orbital_keras_impl <- function(
             all_exprs[[i]] <- stats::setNames(act_exprs, layer_names)
             current_names <- layer_names
         } else {
-            # Output layer: hold pre-activations; activation determined by mode
             out_pre_act <- pre_act
         }
     }
@@ -84,6 +367,7 @@ orbital_keras_impl <- function(
         c(hidden_exprs, multiclass_from_logits(logit_exprs, type, lvl))
     }
 }
+
 
 #' @method orbital keras.engine.sequential.Sequential
 #' @export
