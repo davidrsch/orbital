@@ -1,7 +1,7 @@
 # Helper functions for artificial neural network (MLP) model implementations
 # Used by model-nnet.R, model-brulee.R, model-keras.R, model-h2o.R, model-kerasnip.R
 
-activation_expr <- function(activation, x_expr) {
+activation_expr <- function(activation, x_expr, alpha = NULL) {
     switch(
         activation,
         "linear" = as.character(x_expr),
@@ -15,9 +15,12 @@ activation_expr <- function(activation, x_expr) {
         "Tanh" = ,
         "TanhWithDropout" = glue::glue("tanh({x_expr})"),
         "elu" = ,
-        "celu" = glue::glue(
-            "dplyr::if_else({x_expr} >= 0, {x_expr}, exp({x_expr}) - 1)"
-        ),
+        "celu" = {
+            a <- if (is.null(alpha)) 1.0 else alpha
+            glue::glue(
+                "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * (exp({x_expr}) - 1))"
+            )
+        },
         "selu" = glue::glue(
             "dplyr::if_else({x_expr} > 0, 1.0507009873554805 * {x_expr}, 1.7580993408473766 * (exp({x_expr}) - 1))"
         ),
@@ -27,15 +30,27 @@ activation_expr <- function(activation, x_expr) {
         "hardshrink" = glue::glue(
             "dplyr::if_else(abs({x_expr}) > 0.5, {x_expr}, 0)"
         ),
+        # PyTorch hardsigmoid: clamp x to [-3, 3], then x/6 + 0.5
         "hardsigmoid" = glue::glue(
             "dplyr::if_else({x_expr} <= -3, 0, dplyr::if_else({x_expr} >= 3, 1, {x_expr} / 6 + 0.5))"
+        ),
+        # Keras3 hard_sigmoid: clamp x to [-2.5, 2.5], then 0.2*x + 0.5
+        "hard_sigmoid" = glue::glue(
+            "dplyr::if_else({x_expr} <= -2.5, 0, dplyr::if_else({x_expr} >= 2.5, 1, 0.2 * {x_expr} + 0.5))"
         ),
         "hardtanh" = glue::glue(
             "dplyr::if_else({x_expr} < -1, -1, dplyr::if_else({x_expr} > 1, 1, {x_expr}))"
         ),
-        "leaky_relu" = glue::glue(
-            "dplyr::if_else({x_expr} >= 0, {x_expr}, 0.01 * {x_expr})"
+        "hard_swish" = ,
+        "hardswish" = glue::glue(
+            "{x_expr} * dplyr::if_else({x_expr} <= -3, 0, dplyr::if_else({x_expr} >= 3, 1, ({x_expr} + 3) / 6))"
         ),
+        "leaky_relu" = {
+            a <- if (is.null(alpha)) 0.01 else alpha
+            glue::glue(
+                "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * {x_expr})"
+            )
+        },
         "log_sigmoid" = glue::glue("log(1 / (1 + exp(-({x_expr}))))"),
         "relu6" = glue::glue(
             "dplyr::if_else({x_expr} < 0, 0, dplyr::if_else({x_expr} > 6, 6, {x_expr}))"
