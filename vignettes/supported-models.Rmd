@@ -10,7 +10,7 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-The supported methods currently all come from [tidypredict](https://tidypredict.tidymodels.org/) right now.
+The supported methods currently come from [tidypredict](https://tidypredict.tidymodels.org/) or are implemented natively for ANN models.
 
 ## Supported models
 
@@ -33,23 +33,29 @@ library(gt)
 library(dplyr)
 
 tibble::tribble(
-  ~parsnip,               ~engine,              ~numeric, ~class, ~prob,
-  "`boost_tree()`",       "`\"catboost\"`",     "✅",     "✅",    "✅",
-  "`boost_tree()`",       "`\"lightgbm\"`",     "✅",     "✅",    "✅",
-  "`boost_tree()`",       "`\"xgboost\"`",      "✅",     "✅",    "✅",
-  "`cubist_rules()`",     "`\"Cubist\"`",       "✅",     "❌",    "❌",
-  "`decision_tree()`",    "`\"partykit\"`",     "✅",     "✅",    "✅",
-  "`decision_tree()`",    "`\"rpart\"`",        "✅",     "✅",    "✅",
-  "`linear_reg()`",       "`\"lm\"`",           "✅",     "❌",    "❌",
-  "`linear_reg()`",       "`\"glmnet\"`",       "✅",     "❌",    "❌",
-  "`logistic_reg()`",     "`\"glm\"`",          "❌",     "✅",    "✅",
-  "`logistic_reg()`",     "`\"glmnet\"`",       "❌",     "✅",    "✅",
-  "`mars()`",             "`\"earth\"`",        "✅",     "✅",    "✅",
-  "`multinom_reg()`",     "`\"glmnet\"`",       "❌",     "✅",    "✅",
-  "`naive_Bayes()`",      "`\"naivebayes\"`",   "❌",     "⚪",    "⚪",
-  "`nearest_neighbor()`", "`any`",              "❌",     "❌",    "❌",
-  "`rand_forest()`",      "`\"randomForest\"`", "✅",     "✅",    "✅",
-  "`rand_forest()`",      "`\"ranger\"`",       "✅",     "✅",    "✅"
+  ~parsnip, ~engine, ~numeric, ~class, ~prob,
+  "`boost_tree()`", "`\"catboost\"`", "✅", "✅", "✅",
+  "`boost_tree()`", "`\"lightgbm\"`", "✅", "✅", "✅",
+  "`boost_tree()`", "`\"xgboost\"`", "✅", "✅", "✅",
+  "`cubist_rules()`", "`\"Cubist\"`", "✅", "❌", "❌",
+  "`decision_tree()`", "`\"partykit\"`", "✅", "✅", "✅",
+  "`decision_tree()`", "`\"rpart\"`", "✅", "✅", "✅",
+  "`linear_reg()`", "`\"lm\"`", "✅", "❌", "❌",
+  "`linear_reg()`", "`\"glmnet\"`", "✅", "❌", "❌",
+  "`logistic_reg()`", "`\"glm\"`", "❌", "✅", "✅",
+  "`logistic_reg()`", "`\"glmnet\"`", "❌", "✅", "✅",
+  "`mars()`", "`\"earth\"`", "✅", "✅", "✅",
+  "`multinom_reg()`", "`\"glmnet\"`", "❌", "✅", "✅",
+  "`naive_Bayes()`", "`\"naivebayes\"`", "❌", "⚪", "⚪",
+  "`nearest_neighbor()`", "`any`", "❌", "❌", "❌",
+  "`rand_forest()`", "`\"randomForest\"`", "✅", "✅", "✅",
+  "`rand_forest()`", "`\"ranger\"`", "✅", "✅", "✅",
+  "`mlp()`", "`\"nnet\"`", "✅", "✅", "✅",
+  "`mlp()`", "`\"brulee\"`", "✅", "✅", "✅",
+  "`mlp()`", "`\"brulee_two_layer\"`", "✅", "✅", "✅",
+  "`mlp()`", "`\"keras\"`", "✅", "✅", "✅",
+  "`mlp()`", "`\"h2o\"`", "✅", "✅", "✅",
+  "`mlp()`", "`\"kerasnip\"`", "✅", "✅", "✅"
 ) |>
   gt() |>
   tab_spanner(

@@ -23,6 +23,7 @@ Imports:
 Suggests:
     arrow,
     bonsai,
+    brulee,
     DBI,
     dbplyr,
     dtplyr,
@@ -32,6 +33,7 @@ Suggests:
     glmnet,
     glue,
     gt,
+    h2o,
     hardhat,
     jsonlite,
     kknn,
@@ -56,6 +58,7 @@ Suggests:
     themis,
     tibble,
     tidypredict (>= 1.1.0),
+    torch,
     workflows,
     xgboost
 VignetteBuilder: 
