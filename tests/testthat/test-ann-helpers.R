@@ -194,6 +194,13 @@ test_that("activation_expr: tanhshrink returns x - tanh(x)", {
     expect_equal(result, c(-1, 0, 1) - tanh(c(-1, 0, 1)), tolerance = 1e-6)
 })
 
+test_that("activation_expr: log_softmax raises informative error (requires DAG path)", {
+    expect_error(
+        activation_expr("log_softmax", "z"),
+        regexp = "log_softmax"
+    )
+})
+
 test_that("activation_expr: unknown activation raises an error", {
     expect_error(activation_expr("nonexistent_act_xyz", "z"))
 })

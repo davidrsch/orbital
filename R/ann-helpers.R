@@ -72,6 +72,17 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
         ),
         "softsign" = glue::glue("{x_expr} / (1 + abs({x_expr}))"),
         "tanhshrink" = glue::glue("{x_expr} - tanh({x_expr})"),
+        "log_softmax" = cli::cli_abort(
+            c(
+                "Activation {.val log_softmax} cannot be applied as a per-unit scalar expression.",
+                "i" = paste(
+                    "log_softmax normalises across all units simultaneously.",
+                    "Use a standalone {.cls Activation(\"log_softmax\")} layer",
+                    "placed after a linear Dense layer."
+                ),
+                "i" = "The DAG path in orbital handles standalone Activation layers with softmax/log_softmax correctly."
+            )
+        ),
         cli::cli_abort(
             "Activation function {.val {activation}} is not supported by orbital."
         )
