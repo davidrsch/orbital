@@ -14,15 +14,20 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
         "tanh" = ,
         "Tanh" = ,
         "TanhWithDropout" = glue::glue("tanh({x_expr})"),
-        "elu" = ,
-        "celu" = {
+        "elu" = {
             a <- if (is.null(alpha)) 1.0 else alpha
             glue::glue(
                 "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * (exp({x_expr}) - 1))"
             )
         },
+        "celu" = {
+            a <- if (is.null(alpha)) 1.0 else alpha
+            glue::glue(
+                "pmax(0, {x_expr}) + pmin(0, {format_numeric(a)} * (exp({x_expr} / {format_numeric(a)}) - 1))"
+            )
+        },
         "selu" = glue::glue(
-            "dplyr::if_else({x_expr} > 0, 1.0507009873554805 * {x_expr}, 1.7580993408473766 * (exp({x_expr}) - 1))"
+            "dplyr::if_else({x_expr} > 0, 1.0507009873554805 * {x_expr}, 1.7580992881257667 * (exp({x_expr}) - 1))"
         ),
         "gelu" = glue::glue(
             "{x_expr} * 0.5 * (1 + tanh(({x_expr} + 0.044715 * {x_expr}^3) * 0.7978845608028654))"
@@ -51,7 +56,7 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
                 "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * {x_expr})"
             )
         },
-        "log_sigmoid" = glue::glue("log(1 / (1 + exp(-({x_expr}))))"),
+        "log_sigmoid" = glue::glue("-log(1 + exp(-({x_expr})))"),
         "relu6" = glue::glue(
             "dplyr::if_else({x_expr} < 0, 0, dplyr::if_else({x_expr} > 6, 6, {x_expr}))"
         ),

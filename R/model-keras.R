@@ -389,19 +389,57 @@ orbital_keras_dag_impl <- function(
             if (!nzchar(activation)) {
                 activation <- "linear"
             }
-            unit_names <- paste0(
-                "orbital_act_",
-                lname,
-                "_h",
-                seq_along(in_exprs)
-            )
-            act_exprs <- vapply(
-                in_exprs,
-                function(e) activation_expr(activation, e),
-                character(1)
-            )
-            all_exprs[[lname]] <- stats::setNames(act_exprs, unit_names)
-            assign(lname, unit_names, envir = expr_reg)
+            if (activation %in% c("softmax", "log_softmax")) {
+                expr_bt <- backtick(in_exprs)
+                sm_sum_nm <- paste0("orbital_act_sm_sum_", lname)
+                sm_sum_expr <- paste0(
+                    "(",
+                    paste0("exp(", expr_bt, ")", collapse = " + "),
+                    ")"
+                )
+                unit_names <- paste0(
+                    "orbital_act_",
+                    lname,
+                    "_h",
+                    seq_along(in_exprs)
+                )
+                sm_exprs <- if (activation == "softmax") {
+                    vapply(
+                        seq_along(in_exprs),
+                        function(i) {
+                            paste0("exp(", expr_bt[i], ") / `", sm_sum_nm, "`")
+                        },
+                        character(1)
+                    )
+                } else {
+                    vapply(
+                        seq_along(in_exprs),
+                        function(i) {
+                            paste0(expr_bt[i], " - log(`", sm_sum_nm, "`)")
+                        },
+                        character(1)
+                    )
+                }
+                all_exprs[[lname]] <- c(
+                    stats::setNames(sm_sum_expr, sm_sum_nm),
+                    stats::setNames(sm_exprs, unit_names)
+                )
+                assign(lname, unit_names, envir = expr_reg)
+            } else {
+                unit_names <- paste0(
+                    "orbital_act_",
+                    lname,
+                    "_h",
+                    seq_along(in_exprs)
+                )
+                act_exprs <- vapply(
+                    in_exprs,
+                    function(e) activation_expr(activation, e),
+                    character(1)
+                )
+                all_exprs[[lname]] <- stats::setNames(act_exprs, unit_names)
+                assign(lname, unit_names, envir = expr_reg)
+            }
         } else if (grepl("globalaveragepool", cls)) {
             # GlobalAveragePooling1D: reduce feature columns to their row-wise mean
             if (grepl("2d|3d", cls)) {
@@ -628,6 +666,33 @@ orbital_keras_dag_impl <- function(
 (LayerNorm equivalent) or num_groups = n_channels."
                 ))
             }
+        } else if (grepl("\\bsoftmax\\b", cls, perl = TRUE)) {
+            # Standalone Softmax layer: row-wise softmax normalisation
+            inbound <- topo_map[[lname]]
+            in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+            expr_bt <- backtick(in_exprs)
+            sm_sum_nm <- paste0("orbital_sm_sum_", lname)
+            sm_sum_expr <- paste0(
+                "(",
+                paste0("exp(", expr_bt, ")", collapse = " + "),
+                ")"
+            )
+            unit_names <- paste0(
+                "orbital_sm_",
+                lname,
+                "_h",
+                seq_along(in_exprs)
+            )
+            sm_exprs <- vapply(
+                seq_along(in_exprs),
+                function(i) paste0("exp(", expr_bt[i], ") / `", sm_sum_nm, "`"),
+                character(1)
+            )
+            all_exprs[[lname]] <- c(
+                stats::setNames(sm_sum_expr, sm_sum_nm),
+                stats::setNames(sm_exprs, unit_names)
+            )
+            assign(lname, unit_names, envir = expr_reg)
         } else {
             cli::cli_abort(c(
                 "Unsupported layer type in Keras Functional model: {.cls {cls_orig}}.",
@@ -636,7 +701,7 @@ orbital_keras_dag_impl <- function(
                     "LayerNormalization, InstanceNormalization, GroupNormalization,",
                     "PReLU, GlobalAveragePooling1D, GlobalMaxPooling1D,",
                     "AveragePooling1D, MaxPooling1D, GlobalSumPooling1D,",
-                    "Dropout, Flatten, Reshape, Activation."
+                    "Dropout, Flatten, Reshape, Activation, Softmax."
                 ),
                 "i" = "Please file an issue: {.url https://github.com/davidrsch/orbital/issues/14}"
             ))
@@ -710,12 +775,12 @@ orbital_keras_impl <- function(
         function(l) {
             cls <- tolower(class(l)[1L])
             grepl(
-                "\\badd\\b|concatenate|batchnorm|layernorm|instancenorm|groupnorm|prelu|globalaveragepool|globalmaxpool|averagepooling1d|maxpooling1d|globalsumpooling|\\bactivation\\b",
+                "\\badd\\b|concatenate|batchnorm|layernorm|instancenorm|groupnorm|prelu|globalaveragepool|globalmaxpool|averagepooling1d|maxpooling1d|globalsumpooling|\\bactivation\\b|\\bsoftmax\\b",
                 cls,
                 perl = TRUE
             ) &&
                 !grepl(
-                    "dense|input|flatten|reshape|activation|dropout",
+                    "dense|input|flatten|reshape|dropout",
                     cls
                 )
         },
