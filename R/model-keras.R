@@ -339,10 +339,185 @@ orbital_keras_dag_impl <- function(
                     envir = expr_reg
                 )
             }
+        } else if (grepl("globalaveragepool", cls)) {
+            # GlobalAveragePooling1D: reduce feature columns to their row-wise mean
+            if (grepl("2d|3d", cls)) {
+                cli::cli_abort(
+                    "GlobalAveragePooling2D/3D is not supported by orbital (requires spatial aggregation)."
+                )
+            }
+            inbound <- topo_map[[lname]]
+            in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+            n_f <- length(in_exprs)
+            expr_bt <- backtick(in_exprs)
+            gap_nm <- paste0("orbital_gap_", lname, "_1")
+            gap_expr <- paste0(
+                "(",
+                paste(expr_bt, collapse = " + "),
+                ") / ",
+                n_f
+            )
+            all_exprs[[lname]] <- stats::setNames(gap_expr, gap_nm)
+            assign(lname, gap_nm, envir = expr_reg)
+        } else if (grepl("globalmaxpool", cls)) {
+            # GlobalMaxPooling1D: reduce feature columns to their row-wise max
+            if (grepl("2d|3d", cls)) {
+                cli::cli_abort(
+                    "GlobalMaxPooling2D/3D is not supported by orbital (requires spatial aggregation)."
+                )
+            }
+            inbound <- topo_map[[lname]]
+            in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+            expr_bt <- backtick(in_exprs)
+            gmp_nm <- paste0("orbital_gmp_", lname, "_1")
+            gmp_expr <- paste0(
+                "do.call(pmax, list(",
+                paste(expr_bt, collapse = ", "),
+                "))"
+            )
+            all_exprs[[lname]] <- stats::setNames(gmp_expr, gmp_nm)
+            assign(lname, gmp_nm, envir = expr_reg)
+        } else if (grepl("instancenorm", cls)) {
+            # InstanceNormalization: per-row normalize across features (same as LayerNorm for 1D)
+            inbound <- topo_map[[lname]]
+            in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+            wts <- l$get_weights() # gamma, beta
+            gamma <- as.numeric(wts[[1L]])
+            beta <- as.numeric(wts[[2L]])
+            n_feat <- length(in_exprs)
+            eps <- tryCatch(as.numeric(l$epsilon), error = function(e) 1e-3)
+            expr_bt <- backtick(in_exprs)
+            mean_nm <- paste0("orbital_in_mean_", lname)
+            var_nm <- paste0("orbital_in_var_", lname)
+            mean_expr <- paste0(
+                "(",
+                paste(expr_bt, collapse = " + "),
+                ") / ",
+                n_feat
+            )
+            var_parts <- paste0("(", expr_bt, " - `", mean_nm, "`)^2")
+            var_expr <- paste0(
+                "(",
+                paste(var_parts, collapse = " + "),
+                ") / ",
+                n_feat
+            )
+            unit_names <- paste0(
+                "orbital_in_",
+                lname,
+                "_h",
+                seq_along(in_exprs)
+            )
+            norm_exprs <- vapply(
+                seq_along(in_exprs),
+                function(i) {
+                    xe <- backtick(in_exprs[[i]])
+                    glue::glue(
+                        "(({xe} - `{mean_nm}`) / sqrt(`{var_nm}` + {format_numeric(eps)})) * {format_numeric(gamma[i])} + {format_numeric(beta[i])}"
+                    )
+                },
+                character(1)
+            )
+            all_exprs[[lname]] <- c(
+                stats::setNames(mean_expr, mean_nm),
+                stats::setNames(var_expr, var_nm),
+                stats::setNames(norm_exprs, unit_names)
+            )
+            assign(lname, unit_names, envir = expr_reg)
+        } else if (grepl("groupnorm", cls)) {
+            # GroupNormalization: normalize within each group of features
+            inbound <- topo_map[[lname]]
+            in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+            wts <- l$get_weights() # gamma, beta
+            gamma <- as.numeric(wts[[1L]])
+            beta <- as.numeric(wts[[2L]])
+            n_feat <- length(in_exprs)
+            eps <- tryCatch(as.numeric(l$epsilon), error = function(e) 1e-3)
+            num_groups <- tryCatch(
+                as.integer(l$get_config()$groups),
+                error = function(e) 1L
+            )
+            if (is.null(num_groups) || is.na(num_groups)) {
+                num_groups <- 1L
+            }
+
+            if (num_groups == 1L) {
+                # Equivalent to LayerNorm: normalize all features together
+                expr_bt <- backtick(in_exprs)
+                mean_nm <- paste0("orbital_gn_mean_", lname)
+                var_nm <- paste0("orbital_gn_var_", lname)
+                mean_expr <- paste0(
+                    "(",
+                    paste(expr_bt, collapse = " + "),
+                    ") / ",
+                    n_feat
+                )
+                var_parts <- paste0("(", expr_bt, " - `", mean_nm, "`)^2")
+                var_expr <- paste0(
+                    "(",
+                    paste(var_parts, collapse = " + "),
+                    ") / ",
+                    n_feat
+                )
+                unit_names <- paste0(
+                    "orbital_gn_",
+                    lname,
+                    "_h",
+                    seq_along(in_exprs)
+                )
+                norm_exprs <- vapply(
+                    seq_along(in_exprs),
+                    function(i) {
+                        xe <- backtick(in_exprs[[i]])
+                        glue::glue(
+                            "(({xe} - `{mean_nm}`) / sqrt(`{var_nm}` + {format_numeric(eps)})) * {format_numeric(gamma[i])} + {format_numeric(beta[i])}"
+                        )
+                    },
+                    character(1)
+                )
+                all_exprs[[lname]] <- c(
+                    stats::setNames(mean_expr, mean_nm),
+                    stats::setNames(var_expr, var_nm),
+                    stats::setNames(norm_exprs, unit_names)
+                )
+                assign(lname, unit_names, envir = expr_reg)
+            } else if (num_groups == n_feat) {
+                # Each group has 1 feature: per-feature normalization
+                # With 1 element per group, mean = x_i and var = 0
+                # output_i = (x_i - x_i) / sqrt(0 + eps) * gamma_i + beta_i = beta_i
+                unit_names <- paste0(
+                    "orbital_gn_",
+                    lname,
+                    "_h",
+                    seq_along(in_exprs)
+                )
+                singleton_exprs <- vapply(
+                    seq_along(in_exprs),
+                    function(i) format_numeric(beta[i]),
+                    character(1)
+                )
+                all_exprs[[lname]] <- stats::setNames(
+                    singleton_exprs,
+                    unit_names
+                )
+                assign(lname, unit_names, envir = expr_reg)
+            } else {
+                cli::cli_abort(c(
+                    "Unsupported GroupNormalization configuration in Keras model: \\
+{.val {lname}} has {num_groups} groups for {n_feat} features.",
+                    "i" = "orbital supports GroupNormalization with num_groups = 1 \\
+(LayerNorm equivalent) or num_groups = n_channels."
+                ))
+            }
         } else {
             cli::cli_abort(c(
                 "Unsupported layer type in Keras Functional model: {.cls {cls_orig}}.",
-                "i" = "orbital supports: Dense, Add, Concatenate, BatchNormalization, LayerNormalization, PReLU, Dropout, Flatten, Reshape, Activation.",
+                "i" = paste(
+                    "orbital supports: Dense, Add, Concatenate, BatchNormalization,",
+                    "LayerNormalization, InstanceNormalization, GroupNormalization,",
+                    "PReLU, GlobalAveragePooling1D, GlobalMaxPooling1D,",
+                    "Dropout, Flatten, Reshape, Activation."
+                ),
                 "i" = "Please file an issue: {.url https://github.com/davidrsch/orbital/issues/14}"
             ))
         }
@@ -393,7 +568,7 @@ orbital_keras_impl <- function(
         function(l) {
             cls <- tolower(class(l)[1L])
             grepl(
-                "\\badd\\b|concatenate|batchnorm|layernorm|prelu",
+                "\\badd\\b|concatenate|batchnorm|layernorm|instancenorm|groupnorm|prelu|globalaveragepool|globalmaxpool",
                 cls,
                 perl = TRUE
             ) &&

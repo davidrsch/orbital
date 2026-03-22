@@ -1,0 +1,240 @@
+---
+title: "Translating keras3 and brulee ANN Models"
+description: >
+  A guide to translating keras3 and brulee multilayer perceptron models to
+  SQL with orbital: supported layers, worked examples, and known limitations.
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Translating keras3 and brulee ANN Models}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    collapse = TRUE,
+    comment = "#>",
+    eval = FALSE
+)
+```
+
+orbital translates fitted `mlp()` parsnip models from the `"brulee"` and
+`"keras"` / `"keras3"` engines into SQL column expressions that reproduce
+the model's predictions row-by-row.  No Python or PyTorch process is needed
+at inference time — the SQL is self-contained.
+
+## Quick start
+
+```r
+library(parsnip)
+library(orbital)
+
+# Fit a brulee MLP
+spec <- mlp(hidden_units = c(32, 16), activation = "relu", epochs = 50) |>
+  set_engine("brulee") |>
+  set_mode("regression")
+
+fit <- spec |> fit(mpg ~ ., data = mtcars)
+
+# Translate to SQL column expressions
+orb <- orbital(fit)
+orb
+
+# Apply to in-memory data with dplyr
+library(dplyr)
+mtcars_tbl <- as_tibble(mtcars)
+predict(orb, new_data = mtcars_tbl)
+```
+
+---
+
+## Supported layer types
+
+The table below summarises which keras3 / keras layer types orbital can
+translate.
+
+| Layer type | orbital support | Notes |
+|---|---|---|
+| `Dense` | ✅ Supported | Full `W·x + b` with output activation |
+| `BatchNormalization` | ✅ Supported | Inference constants (mean, var, γ, β) frozen at export |
+| `LayerNormalization` | ✅ Supported | Per-row symbolic mean and variance expressions |
+| `PReLU` | ✅ Supported | Per-channel learnable negative slopes |
+| `ELU` | ✅ Supported | Alpha extracted from layer config |
+| `LeakyReLU` | ✅ Supported | Alpha extracted from layer config |
+| `GELU` | ✅ Supported | `0.5·x·(1 + tanh(√(2/π)·(x + 0.044715·x³)))` approximation |
+| `ReLU` / `Activation("relu")` | ✅ Supported | Standard `max(0, x)` |
+| `Sigmoid` / `Activation("sigmoid")` | ✅ Supported | `1 / (1 + exp(-x))` |
+| `Tanh` / `Activation("tanh")` | ✅ Supported | `(exp(2x)-1)/(exp(2x)+1)` |
+| `Softmax` | ✅ Supported | Stable log-sum-exp normalisation |
+| `Activation("elu")` | ✅ Supported | |
+| `Activation("selu")` | ✅ Supported | `scale * (x ≥ 0 ? x : alpha·(exp(x)-1))` |
+| `Activation("gelu")` | ✅ Supported | |
+| `Dropout` | ✅ Pass-through | Identity at inference time |
+| `Concatenate` | ✅ Supported | axis=1 (feature concat) only |
+| `Add` (residual) | ✅ Supported | Element-wise sum of two input branches |
+| `GlobalAveragePooling1D` | ✅ Supported | Row-wise mean over all input features |
+| `GlobalMaxPooling1D` | ✅ Supported | Row-wise max over all input features |
+| `InstanceNormalization` | ✅ Supported | Per-row mean and variance (same formula as LayerNorm) |
+| `GroupNormalization` | ✅ Supported | `num_groups=1` → LayerNorm; `num_groups=n_features` → per-feature |
+| `LSTM` / `GRU` / `RNN` | ❌ Not supported | Recurrent layers are not translatable to SQL |
+| `Conv1D` / `Conv2D` | ❌ Not supported | Requires spatial aggregation |
+| `GlobalAveragePooling2D/3D` | ❌ Not supported | Requires spatial aggregation |
+| `Attention` / `MultiHeadAttention` | ❌ Not supported | |
+
+---
+
+## Example 1 — Sequential model with BatchNorm and ELU
+
+```r
+library(keras3)
+library(parsnip)
+library(orbital)
+
+# Build and compile the model
+inp   <- layer_input(shape = 4)
+out   <- inp |>
+  layer_dense(16) |>
+  layer_batch_normalization() |>
+  layer_activation_elu(alpha = 1.0) |>
+  layer_dense(1)
+
+model <- keras_model(inp, out)
+model |> compile(optimizer = "adam", loss = "mse")
+model |> fit(matrix(rnorm(800), 200, 4), rnorm(200), epochs = 10, verbose = 0)
+
+# Wrap in a parsnip fit and translate
+fit   <- keras3_mlp_fit(model, mode = "regression", feature_names = paste0("x", 1:4))
+orb   <- orbital(fit)
+orb
+#> ── orbital Object ──────────────────────────────────────────────────────────────
+#> 4 equations in total.
+#> ...
+
+# Score new data — pure dplyr, no Python required
+library(dplyr)
+new_data <- tibble(x1 = 0.1, x2 = -0.5, x3 = 1.2, x4 = 0.3)
+predict(orb, new_data)
+```
+
+---
+
+## Example 2 — Functional API with Concatenate
+
+```r
+library(keras3)
+library(parsnip)
+library(orbital)
+
+# Two input branches merged with Concatenate
+branch_a <- layer_input(shape = 3)
+branch_b <- layer_input(shape = 3)
+
+out <- layer_concatenate(list(branch_a, branch_b)) |>
+  layer_dense(8, activation = "relu") |>
+  layer_dense(1)
+
+model <- keras_model(list(branch_a, branch_b), out)
+model |> compile(optimizer = "adam", loss = "mse")
+
+x_a <- matrix(rnorm(300), 100, 3)
+x_b <- matrix(rnorm(300), 100, 3)
+y   <- rnorm(100)
+model |> fit(list(x_a, x_b), y, epochs = 10, verbose = 0)
+
+# orbital handles multi-input Functional models
+fit <- keras3_mlp_fit(
+  model, mode = "regression",
+  feature_names = c(paste0("a", 1:3), paste0("b", 1:3))
+)
+orb <- orbital(fit)
+```
+
+---
+
+## Example 3 — GlobalAveragePooling1D
+
+```r
+library(keras3)
+library(parsnip)
+library(orbital)
+
+inp <- layer_input(shape = 8)
+out <- inp |>
+  layer_dense(8, activation = "relu") |>
+  layer_global_average_pooling_1d() |>   # reduces 8 features → 1 mean
+  layer_dense(1)
+
+model <- keras_model(inp, out)
+model |> compile(optimizer = "adam", loss = "mse")
+model |> fit(matrix(rnorm(800), 100, 8), rnorm(100), epochs = 5, verbose = 0)
+
+fit <- keras3_mlp_fit(model, mode = "regression", feature_names = paste0("x", 1:8))
+orb <- orbital(fit)
+```
+
+---
+
+## brulee models
+
+`brulee` uses PyTorch under the hood; orbital extracts weights and activation
+function names directly from the fitted Torch module.
+
+```r
+library(parsnip)
+library(orbital)
+
+# Fit a brulee MLP with ELU activation
+spec <- mlp(hidden_units = c(32, 16), activation = "elu", epochs = 50) |>
+  set_engine("brulee") |>
+  set_mode("regression")
+
+fit <- spec |> fit(mpg ~ ., data = mtcars)
+orb <- orbital(fit)
+
+# The ELU alpha is extracted automatically from the Torch module
+orb
+```
+
+### Supported brulee activations
+
+All activations listed in `brulee::mlp()` are supported:
+`relu`, `tanh`, `sigmoid`, `elu`, `selu`, `gelu`, `leaky_relu`,
+`softplus`, `silu` / `swish`, and `mish`.
+
+The `leaky_relu` negative slope and `elu` / `celu` alpha are extracted
+automatically from the fitted `torch::nn_module` — you do not need to pass
+them manually.
+
+---
+
+## Known limitations
+
+### SQL expression depth
+Deep networks (6+ hidden layers, 100+ units per layer) produce very long SQL
+strings.  Some databases impose limits on query-string length or query-plan
+depth.  For very deep models, consider materialising intermediate layer outputs
+into temporary tables.
+
+### Spatial layers
+`GlobalAveragePooling2D`, `GlobalMaxPooling2D`, `Conv1D`, `Conv2D`, and
+similar spatial layers are not supported.  Only 1-D feature inputs (a single
+flat vector per row) are translatable to SQL.
+
+### Recurrent and attention layers
+`LSTM`, `GRU`, `RNN`, `MultiHeadAttention`, and related layers require
+sequential state that cannot be expressed as a SQL column expression.
+
+### GroupNorm with arbitrary groups
+`GroupNormalization` with `num_groups` other than 1 or `n_features` raises
+an error because intermediate group-statistics cannot be expressed as a
+single SQL expression without temporary tables.
+
+### Runtime dependencies at fit time
+keras3 models require a working Python + TensorFlow/JAX/PyTorch backend to
+*fit* the model.  Once the orbital object is created no Python process is
+needed — all prediction SQL is self-contained.
+
+### H2O Maxout
+The Maxout activation uses a grouped max-pooling architecture that orbital
+does not currently support.  Use `Rectifier`, `Tanh`, or `Sigmoid` for
+orbital-compatible H2O models.

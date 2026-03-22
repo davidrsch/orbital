@@ -106,6 +106,19 @@ predict(orbital_obj, sc_mtcars)
 
 Full list of supported models and recipes steps can be found here: `vignette("supported-models")`.
 
+## ANN model support (keras3, brulee)
+
+orbital can translate `mlp()` models fitted with the `"brulee"`, `"keras"`,
+`"keras3"`, and `"kerasnip"` engines into SQL column expressions.  The
+translation covers Dense layers, BatchNormalization, LayerNormalization,
+PReLU, ELU, LeakyReLU, GELU, GlobalAveragePooling1D, GlobalMaxPooling1D,
+GroupNormalization, InstanceNormalization, and Concatenate / Add (residual)
+layers, as well as all standard activations (relu, tanh, sigmoid, selu,
+softplus, swish, mish).
+
+A full guide with worked examples and a support matrix is available at:
+`vignette("keras3-models")`.
+
 ## Python Version
 
 We have created a [python version of orbital](https://posit-dev.github.io/orbital/) that works on on fitted scikit learn models.

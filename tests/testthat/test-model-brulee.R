@@ -108,3 +108,49 @@ test_that("mlp() brulee_two_layer works with multiclass prob", {
 
     expect_equal(preds, exps, tolerance = 1e-5)
 })
+
+test_that("mlp() brulee with elu activation matches predictions", {
+    skip_if_not_installed("parsnip")
+    skip_if_not_installed("brulee")
+    skip_if(!torch::torch_is_installed(), "torch not installed")
+
+    spec <- parsnip::mlp(hidden_units = 4, epochs = 20, engine = "brulee") |>
+        parsnip::set_mode("regression") |>
+        parsnip::set_engine("brulee", activation = "elu")
+
+    set.seed(1)
+    fit <- parsnip::fit(spec, mpg ~ disp + wt + hp, mtcars)
+
+    orb_obj <- orbital(fit)
+    preds <- predict(orb_obj, mtcars)
+    exps <- predict(fit, mtcars)
+
+    exps <- as.data.frame(exps)
+    rownames(preds) <- NULL
+    rownames(exps) <- NULL
+
+    expect_equal(preds, exps, tolerance = 1e-5)
+})
+
+test_that("mlp() brulee with leaky_relu activation matches predictions", {
+    skip_if_not_installed("parsnip")
+    skip_if_not_installed("brulee")
+    skip_if(!torch::torch_is_installed(), "torch not installed")
+
+    spec <- parsnip::mlp(hidden_units = 4, epochs = 20, engine = "brulee") |>
+        parsnip::set_mode("regression") |>
+        parsnip::set_engine("brulee", activation = "leaky_relu")
+
+    set.seed(1)
+    fit <- parsnip::fit(spec, mpg ~ disp + wt + hp, mtcars)
+
+    orb_obj <- orbital(fit)
+    preds <- predict(orb_obj, mtcars)
+    exps <- predict(fit, mtcars)
+
+    exps <- as.data.frame(exps)
+    rownames(preds) <- NULL
+    rownames(exps) <- NULL
+
+    expect_equal(preds, exps, tolerance = 1e-5)
+})

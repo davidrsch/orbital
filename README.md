@@ -1,4 +1,3 @@
-
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
 # orbital <a href="https://orbital.tidymodels.org"><img src="man/figures/logo.png" align="right" height="138" alt="orbital website" /></a>
@@ -12,6 +11,7 @@ status](https://www.r-pkg.org/badges/version/orbital)](https://CRAN.R-project.or
 coverage](https://codecov.io/gh/tidymodels/orbital/graph/badge.svg)](https://app.codecov.io/gh/tidymodels/orbital)
 [![Lifecycle:
 stable](https://img.shields.io/badge/lifecycle-stable-brightgreen.svg)](https://lifecycle.r-lib.org/articles/stages.html#stable)
+
 <!-- badges: end -->
 
 The goal of orbital is to enable running predictions of tidymodels
@@ -21,14 +21,14 @@ The goal of orbital is to enable running predictions of tidymodels
 
 To install it, use:
 
-``` r
+```r
 install.packages("orbital")
 ```
 
 You can install the development version of orbital from
 [GitHub](https://github.com/) with:
 
-``` r
+```r
 # install.packages("devtools")
 devtools::install_github("tidymodels/orbital")
 ```
@@ -37,7 +37,7 @@ devtools::install_github("tidymodels/orbital")
 
 Given a fitted workflow
 
-``` r
+```r
 library(tidymodels)
 
 rec_spec <- recipe(mpg ~ ., data = mtcars) |>
@@ -52,7 +52,7 @@ wf_fit <- fit(wf_spec, mtcars)
 
 You can predict with it like normal.
 
-``` r
+```r
 predict(wf_fit, mtcars)
 #> # A tibble: 32 × 1
 #>    .pred
@@ -72,11 +72,11 @@ predict(wf_fit, mtcars)
 
 We can get the same results by first creating an orbital object
 
-``` r
+```r
 library(orbital)
 orbital_obj <- orbital(wf_fit)
 orbital_obj
-#> 
+#>
 #> ── orbital Object ──────────────────────────────────────────────────────────────
 #> • cyl = (cyl - 6.1875) / 1.785922
 #> • disp = (disp - 230.7219) / 123.9387
@@ -95,7 +95,7 @@ orbital_obj
 
 and then “predicting” with it using `predict()` to get the same results
 
-``` r
+```r
 predict(orbital_obj, as_tibble(mtcars))
 #> # A tibble: 32 × 1
 #>    .pred
@@ -115,7 +115,7 @@ predict(orbital_obj, as_tibble(mtcars))
 
 you can also predict in most SQL databases
 
-``` r
+```r
 library(DBI)
 library(RSQLite)
 
@@ -142,7 +142,7 @@ predict(orbital_obj, db_mtcars)
 
 and spark databases
 
-``` r
+```r
 library(sparklyr)
 sc <- spark_connect(master = "local")
 
@@ -170,6 +170,19 @@ predict(orbital_obj, sc_mtcars)
 
 Full list of supported models and recipes steps can be found here:
 `vignette("supported-models")`.
+
+## ANN model support (keras3, brulee)
+
+orbital can translate `mlp()` models fitted with the `"brulee"`, `"keras"`,
+`"keras3"`, and `"kerasnip"` engines into SQL column expressions. The
+translation covers Dense layers, BatchNormalization, LayerNormalization,
+PReLU, ELU, LeakyReLU, GELU, GlobalAveragePooling1D, GlobalMaxPooling1D,
+GroupNormalization, InstanceNormalization, and Concatenate / Add (residual)
+layers, as well as all standard activations (relu, tanh, sigmoid, selu,
+softplus, swish, mish).
+
+A full guide with worked examples and a support matrix is available at:
+`vignette("keras3-models")`.
 
 ## Python Version
 
