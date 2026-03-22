@@ -967,3 +967,429 @@ test_that("keras3 Functional model with standalone Activation layer translates c
     preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
     expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
 })
+
+# ── activations: selu, mish, softplus, softsign, leaky_relu (R audit rec #1) ─
+
+test_that("keras3 Sequential model with SELU activation predictions match keras3 predict", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    model <- k$Sequential(list(
+        k$layers$Dense(6L, activation = "selu", input_shape = list(3L)),
+        k$layers$Dense(1L)
+    ))
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(30), nrow = 10, ncol = 3)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 5L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:3)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    hidden_exprs <- orb_obj[grepl("orbital_mlp", names(orb_obj))]
+    # Every SELU expression must contain the SELU scale constant
+    expect_true(any(grepl("1.0507009873554805", hidden_exprs)))
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+test_that("keras3 Sequential model with Mish activation predictions match keras3 predict", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    model <- k$Sequential(list(
+        k$layers$Dense(6L, activation = "mish", input_shape = list(3L)),
+        k$layers$Dense(1L)
+    ))
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(30), nrow = 10, ncol = 3)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 5L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:3)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    hidden_exprs <- orb_obj[grepl("orbital_mlp", names(orb_obj))]
+    # Mish uses tanh(log(1 + exp(x))) — both tanh and log must appear
+    expect_true(any(grepl("tanh", hidden_exprs)))
+    expect_true(any(grepl("log", hidden_exprs)))
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+test_that("keras3 Sequential model with Softplus activation predictions match keras3 predict", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    model <- k$Sequential(list(
+        k$layers$Dense(6L, activation = "softplus", input_shape = list(3L)),
+        k$layers$Dense(1L)
+    ))
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(30), nrow = 10, ncol = 3)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 5L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:3)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    hidden_exprs <- orb_obj[grepl("orbital_mlp", names(orb_obj))]
+    expect_true(any(grepl("log\\(1 \\+ exp", hidden_exprs)))
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+test_that("keras3 Sequential model with Softsign activation predictions match keras3 predict", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    model <- k$Sequential(list(
+        k$layers$Dense(6L, activation = "softsign", input_shape = list(3L)),
+        k$layers$Dense(1L)
+    ))
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(30), nrow = 10, ncol = 3)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 5L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:3)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    hidden_exprs <- orb_obj[grepl("orbital_mlp", names(orb_obj))]
+    expect_true(any(grepl("abs", hidden_exprs)))
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+test_that("keras3 Functional model with LeakyReLU layer (leaky_relu) predictions match", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(8L)(inp)
+    x <- k$layers$LeakyReLU(negative_slope = 0.2)(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 5L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:4)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    # leaky_relu uses if_else and the slope value
+    expect_true(is.character(orb_obj))
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+# ── standalone Activation layer: non-relu variants (R audit rec #5) ──────────
+
+test_that("keras3 Functional model with standalone Activation(tanh) translations match", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(3L))
+    x <- k$layers$Dense(6L)(inp)
+    x <- k$layers$Activation("tanh")(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(30), nrow = 10, ncol = 3)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 3L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:3)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    expect_true(any(grepl("orbital_act_", names(orb_obj))))
+    act_exprs <- orb_obj[grepl("orbital_act_", names(orb_obj))]
+    expect_true(any(grepl("tanh", act_exprs)))
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+test_that("keras3 Functional model with standalone Activation(sigmoid) translations match", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(3L))
+    x <- k$layers$Dense(6L)(inp)
+    x <- k$layers$Activation("sigmoid")(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(30), nrow = 10, ncol = 3)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 3L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:3)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    expect_true(any(grepl("orbital_act_", names(orb_obj))))
+    act_exprs <- orb_obj[grepl("orbital_act_", names(orb_obj))]
+    expect_true(any(grepl("exp", act_exprs)))
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+# ── multi-output Functional API (R audit rec #2 / R#32) ──────────────────────
+
+test_that("keras3 Functional model with two output Dense layers produces named predictions", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(8L, activation = "relu")(inp)
+    out1 <- k$layers$Dense(1L, name = "output_1")(x)
+    out2 <- k$layers$Dense(1L, name = "output_2")(x)
+    model <- k$Model(inputs = inp, outputs = list(out1, out2))
+    model$compile(
+        optimizer = "adam",
+        loss = list("mse", "mse")
+    )
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y1 <- rnorm(10)
+    y2 <- rnorm(10)
+    model$fit(x_mat, list(y1, y2), epochs = 3L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:4)
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    expect_true(is.character(orb_obj))
+    # Both output expressions should be present
+    expect_true(".pred_1" %in% names(orb_obj))
+    expect_true(".pred_2" %in% names(orb_obj))
+})
+
+# ── pooling accuracy tests (R audit rec #3) ───────────────────────────────────
+
+test_that("keras3 AveragePooling1D predictions match keras3 predict (regression)", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(6L, activation = "relu")(inp)
+    x <- k$layers$AveragePooling1D()(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 5L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:4)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+test_that("keras3 MaxPooling1D predictions match keras3 predict (regression)", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(6L, activation = "relu")(inp)
+    x <- k$layers$MaxPooling1D()(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 5L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:4)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+test_that("keras3 GlobalSumPooling1D predictions match keras3 predict (regression)", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(6L, activation = "relu")(inp)
+    x <- k$layers$GlobalSumPooling1D()(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 5L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:4)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+# ── GroupNormalization groups=n_channels path (R audit rec #4) ───────────────
+
+test_that("keras3 GroupNormalization groups=n_channels predictions match keras3 predict", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(8L, activation = "relu")(inp)
+    # groups = n_channels = 8: each feature is its own group → output = beta_i
+    x <- k$layers$GroupNormalization(groups = 8L)(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 5L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:4)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    expect_true(any(grepl("orbital_gn_", names(orb_obj))))
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
