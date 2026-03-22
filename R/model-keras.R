@@ -107,6 +107,31 @@ orbital_keras_dag_impl <- function(
         list()
     }
 
+    # Determine output layer names from model config (Functional API multi-output)
+    raw_out <- if (!is.null(cfg)) {
+        if (!is.null(cfg$config$output_layers)) {
+            cfg$config$output_layers
+        } else if (!is.null(cfg$output_layers)) {
+            cfg$output_layers
+        } else {
+            NULL
+        }
+    } else {
+        NULL
+    }
+    output_layer_names <- if (!is.null(raw_out) && length(raw_out) > 0L) {
+        unique(vapply(
+            raw_out,
+            function(spec) {
+                n <- if (is.list(spec)) spec[[1L]] else spec
+                as.character(n)[1L]
+            },
+            character(1L)
+        ))
+    } else {
+        last_dense # fallback: treat last Dense as the single output
+    }
+
     topo_map <- vector("list", length(layers_cfg))
     for (k in seq_along(layers_cfg)) {
         lc <- layers_cfg[[k]]
@@ -129,7 +154,8 @@ orbital_keras_dag_impl <- function(
     # Expression register: layer_name → character vector of expression names
     expr_reg <- new.env(hash = TRUE, parent = emptyenv())
     all_exprs <- list()
-    out_pre_act <- NULL
+    out_pre_act <- NULL # used for single-output models
+    out_pre_act_map <- list() # layer_name -> pre_act, for multi-output models
 
     for (l in all_layers) {
         cls_orig <- class(l)[1L]
@@ -172,8 +198,9 @@ orbital_keras_dag_impl <- function(
                 NULL
             }
 
-            if (lname == last_dense) {
-                out_pre_act <- pre_act
+            if (lname %in% output_layer_names) {
+                out_pre_act_map[[lname]] <- pre_act
+                if (lname == last_dense) out_pre_act <- pre_act
             } else {
                 act_exprs <- vapply(
                     pre_act,
@@ -325,7 +352,7 @@ orbital_keras_dag_impl <- function(
             )
             all_exprs[[lname]] <- stats::setNames(prelu_exprs, unit_names)
             assign(lname, unit_names, envir = expr_reg)
-        } else if (grepl("dropout|flatten|reshape|activation", cls)) {
+        } else if (grepl("dropout|flatten|reshape", cls)) {
             # Inference-transparent pass-through layers
             inbound <- topo_map[[lname]]
             if (
@@ -339,6 +366,42 @@ orbital_keras_dag_impl <- function(
                     envir = expr_reg
                 )
             }
+        } else if (grepl("^activation", cls)) {
+            # Standalone Activation layer: apply activation function to inbound expressions
+            inbound <- topo_map[[lname]]
+            if (is.null(inbound) || length(inbound) < 1L) {
+                cli::cli_abort(
+                    "Activation layer {.val {lname}} has no inbound connections in model config."
+                )
+            }
+            in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+            act_cfg <- tryCatch(
+                l$get_config()$activation,
+                error = function(e) "linear"
+            )
+            activation <- if (is.null(act_cfg)) {
+                "linear"
+            } else if (is.list(act_cfg)) {
+                tolower(as.character(act_cfg$class_name)[1L])
+            } else {
+                tolower(as.character(act_cfg)[1L])
+            }
+            if (!nzchar(activation)) {
+                activation <- "linear"
+            }
+            unit_names <- paste0(
+                "orbital_act_",
+                lname,
+                "_h",
+                seq_along(in_exprs)
+            )
+            act_exprs <- vapply(
+                in_exprs,
+                function(e) activation_expr(activation, e),
+                character(1)
+            )
+            all_exprs[[lname]] <- stats::setNames(act_exprs, unit_names)
+            assign(lname, unit_names, envir = expr_reg)
         } else if (grepl("globalaveragepool", cls)) {
             # GlobalAveragePooling1D: reduce feature columns to their row-wise mean
             if (grepl("2d|3d", cls)) {
@@ -377,6 +440,62 @@ orbital_keras_dag_impl <- function(
             )
             all_exprs[[lname]] <- stats::setNames(gmp_expr, gmp_nm)
             assign(lname, gmp_nm, envir = expr_reg)
+        } else if (grepl("averagepooling1d", cls)) {
+            # AveragePooling1D: row-wise mean of all feature columns
+            if (grepl("2d|3d", cls)) {
+                cli::cli_abort(
+                    "AveragePooling2D/3D is not supported by orbital (requires spatial aggregation)."
+                )
+            }
+            inbound <- topo_map[[lname]]
+            in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+            n_f <- length(in_exprs)
+            expr_bt <- backtick(in_exprs)
+            ap_nm <- paste0("orbital_avgpool1d_", lname, "_1")
+            ap_expr <- paste0(
+                "(",
+                paste(expr_bt, collapse = " + "),
+                ") / ",
+                n_f
+            )
+            all_exprs[[lname]] <- stats::setNames(ap_expr, ap_nm)
+            assign(lname, ap_nm, envir = expr_reg)
+        } else if (grepl("maxpooling1d", cls)) {
+            # MaxPooling1D: row-wise max of all feature columns
+            if (grepl("2d|3d", cls)) {
+                cli::cli_abort(
+                    "MaxPooling2D/3D is not supported by orbital (requires spatial aggregation)."
+                )
+            }
+            inbound <- topo_map[[lname]]
+            in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+            expr_bt <- backtick(in_exprs)
+            mp_nm <- paste0("orbital_maxpool1d_", lname, "_1")
+            mp_expr <- paste0(
+                "do.call(pmax, list(",
+                paste(expr_bt, collapse = ", "),
+                "))"
+            )
+            all_exprs[[lname]] <- stats::setNames(mp_expr, mp_nm)
+            assign(lname, mp_nm, envir = expr_reg)
+        } else if (grepl("globalsumpooling", cls)) {
+            # GlobalSumPooling1D: row-wise sum of all feature columns
+            if (grepl("2d|3d", cls)) {
+                cli::cli_abort(
+                    "GlobalSumPooling2D/3D is not supported by orbital (requires spatial aggregation)."
+                )
+            }
+            inbound <- topo_map[[lname]]
+            in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+            expr_bt <- backtick(in_exprs)
+            gsp_nm <- paste0("orbital_gsp_", lname, "_1")
+            gsp_expr <- paste0(
+                "(",
+                paste(expr_bt, collapse = " + "),
+                ")"
+            )
+            all_exprs[[lname]] <- stats::setNames(gsp_expr, gsp_nm)
+            assign(lname, gsp_nm, envir = expr_reg)
         } else if (grepl("instancenorm", cls)) {
             # InstanceNormalization: per-row normalize across features (same as LayerNorm for 1D)
             inbound <- topo_map[[lname]]
@@ -516,6 +635,7 @@ orbital_keras_dag_impl <- function(
                     "orbital supports: Dense, Add, Concatenate, BatchNormalization,",
                     "LayerNormalization, InstanceNormalization, GroupNormalization,",
                     "PReLU, GlobalAveragePooling1D, GlobalMaxPooling1D,",
+                    "AveragePooling1D, MaxPooling1D, GlobalSumPooling1D,",
                     "Dropout, Flatten, Reshape, Activation."
                 ),
                 "i" = "Please file an issue: {.url https://github.com/davidrsch/orbital/issues/14}"
@@ -523,22 +643,40 @@ orbital_keras_dag_impl <- function(
         }
     }
 
-    if (is.null(out_pre_act)) {
+    if (length(out_pre_act_map) == 0L) {
         cli::cli_abort(
-            "Could not identify the output Dense layer in the Keras model."
+            "Could not identify any output Dense layer in the Keras model."
         )
     }
 
     hidden_exprs <- unlist(all_exprs, use.names = TRUE)
-    n_out <- length(out_pre_act)
+
+    # Combine pre-activations from all output layers in config order
+    all_out_pre_act <- unlist(
+        out_pre_act_map[output_layer_names],
+        use.names = FALSE
+    )
+    n_out <- length(all_out_pre_act)
 
     if (mode == "regression") {
-        c(hidden_exprs, stats::setNames(out_pre_act[1L], prefix))
+        if (n_out == 1L) {
+            c(hidden_exprs, stats::setNames(all_out_pre_act[1L], prefix))
+        } else {
+            # Multiple regression outputs: name them prefix_1, prefix_2, ...
+            out_nms <- if (
+                length(all_out_pre_act) == length(lvl) && !is.null(lvl)
+            ) {
+                lvl
+            } else {
+                paste0(prefix, "_", seq_along(all_out_pre_act))
+            }
+            c(hidden_exprs, stats::setNames(all_out_pre_act, out_nms))
+        }
     } else if (n_out == 1L) {
         c(
             hidden_exprs,
             binary_from_prob(
-                activation_expr("sigmoid", out_pre_act[1L]),
+                activation_expr("sigmoid", all_out_pre_act[1L]),
                 type,
                 lvl
             )
@@ -546,7 +684,11 @@ orbital_keras_dag_impl <- function(
     } else {
         c(
             hidden_exprs,
-            multiclass_from_logits(stats::setNames(out_pre_act, lvl), type, lvl)
+            multiclass_from_logits(
+                stats::setNames(all_out_pre_act, lvl),
+                type,
+                lvl
+            )
         )
     }
 }
@@ -568,7 +710,7 @@ orbital_keras_impl <- function(
         function(l) {
             cls <- tolower(class(l)[1L])
             grepl(
-                "\\badd\\b|concatenate|batchnorm|layernorm|instancenorm|groupnorm|prelu|globalaveragepool|globalmaxpool",
+                "\\badd\\b|concatenate|batchnorm|layernorm|instancenorm|groupnorm|prelu|globalaveragepool|globalmaxpool|averagepooling1d|maxpooling1d|globalsumpooling|\\bactivation\\b",
                 cls,
                 perl = TRUE
             ) &&

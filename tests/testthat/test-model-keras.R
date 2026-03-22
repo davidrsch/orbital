@@ -731,3 +731,139 @@ test_that("keras3 GlobalMaxPooling1D predictions match keras3 predict", {
     preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
     expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
 })
+
+# ── new features: standalone Activation, AveragePooling1D, MaxPooling1D,
+#                 GlobalSumPooling1D, multi-output (R#34, R#35, R#36, R#32) ───
+
+test_that("keras3 Functional model with standalone Activation layer translates", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(3L))
+    x <- k$layers$Dense(6L)(inp)
+    x <- k$layers$Activation("relu")(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(30), nrow = 10, ncol = 3)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 3L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:3)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    expect_true(is.character(orb_obj))
+    expect_named(orb_obj, ".pred", ignore.order = TRUE)
+    expect_true(any(grepl("orbital_act_", names(orb_obj))))
+
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+test_that("keras3 Functional model with AveragePooling1D translates correctly", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(6L, activation = "relu")(inp)
+    x <- k$layers$AveragePooling1D()(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 3L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:4)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    expect_true(is.character(orb_obj))
+    expect_true(any(grepl("orbital_avgpool1d_", names(orb_obj))))
+})
+
+test_that("keras3 Functional model with MaxPooling1D translates correctly", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(6L, activation = "relu")(inp)
+    x <- k$layers$MaxPooling1D()(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 3L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:4)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    expect_true(is.character(orb_obj))
+    expect_true(any(grepl("orbital_maxpool1d_", names(orb_obj))))
+})
+
+test_that("keras3 Functional model with GlobalSumPooling1D translates correctly", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(6L, activation = "relu")(inp)
+    x <- k$layers$GlobalSumPooling1D()(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 3L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:4)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    expect_true(is.character(orb_obj))
+    expect_true(any(grepl("orbital_gsp_", names(orb_obj))))
+})
