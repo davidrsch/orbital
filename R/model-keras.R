@@ -366,7 +366,7 @@ orbital_keras_dag_impl <- function(
                     envir = expr_reg
                 )
             }
-        } else if (grepl("^activation", cls)) {
+        } else if (grepl("\\bactivation\\b", cls, perl = TRUE)) {
             # Standalone Activation layer: apply activation function to inbound expressions
             inbound <- topo_map[[lname]]
             if (is.null(inbound) || length(inbound) < 1L) {
