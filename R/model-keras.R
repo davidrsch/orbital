@@ -834,6 +834,49 @@ orbital_keras_dag_impl <- function(
           "i" = "num_groups must evenly divide the number of features ({n_feat} %% {num_groups} != 0)."
         ))
       }
+    } else if (grepl("rmsnormalization", cls)) {
+      # RMSNormalization: per-row normalize using root mean square (no mean subtraction).
+      # rms  = sqrt((1/C) * sum_c(x_c^2) + epsilon)
+      # y_c  = (x_c / rms) * scale_c
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      wts <- l$get_weights() # scale only (no bias)
+      gamma <- as.numeric(wts[[1L]])
+      n_feat <- length(in_exprs)
+      eps <- tryCatch(as.numeric(l$epsilon), error = function(e) 1e-6)
+      expr_bt <- backtick(in_exprs)
+      rms_nm <- paste0("orbital_rms_", lname)
+      rms_sq_parts <- paste0(expr_bt, "^2")
+      rms_expr <- paste0(
+        "sqrt((",
+        paste(rms_sq_parts, collapse = " + "),
+        ") / ",
+        n_feat,
+        " + ",
+        format_numeric(eps),
+        ")"
+      )
+      unit_names <- paste0(
+        "orbital_rms_",
+        lname,
+        "_h",
+        seq_along(in_exprs)
+      )
+      norm_exprs <- vapply(
+        seq_along(in_exprs),
+        function(i) {
+          xe <- backtick(in_exprs[[i]])
+          glue::glue(
+            "({xe} / `{rms_nm}`) * {format_numeric(gamma[i])}"
+          )
+        },
+        character(1)
+      )
+      all_exprs[[lname]] <- c(
+        stats::setNames(rms_expr, rms_nm),
+        stats::setNames(norm_exprs, unit_names)
+      )
+      assign(lname, unit_names, envir = expr_reg)
     } else if (grepl("\\bsoftmax\\b", cls, perl = TRUE)) {
       # Standalone Softmax layer: row-wise softmax normalisation (max-stabilised)
       # Subtracting the row-wise max before exp() prevents overflow for large logits
@@ -893,7 +936,7 @@ orbital_keras_dag_impl <- function(
         "i" = paste(
           "orbital supports: Dense, Add, Concatenate, BatchNormalization,",
           "LayerNormalization, InstanceNormalization, GroupNormalization,",
-          "PReLU, GlobalAveragePooling1D, GlobalMaxPooling1D,",
+          "RMSNormalization, PReLU, GlobalAveragePooling1D, GlobalMaxPooling1D,",
           "AveragePooling1D, MaxPooling1D, GlobalSumPooling1D,",
           "Dropout, Flatten, Reshape, Activation, Softmax."
         ),
@@ -967,7 +1010,7 @@ orbital_keras_impl <- function(
     function(l) {
       cls <- tolower(class(l)[1L])
       grepl(
-        "\\badd\\b|concatenate|batchnorm|layernorm|instancenorm|groupnorm|prelu|leakyrelu|\\belu\\b|globalaveragepool|globalmaxpool|averagepooling1d|maxpooling1d|globalsumpooling|\\bactivation\\b|\\bsoftmax\\b",
+        "\\badd\\b|concatenate|batchnorm|layernorm|instancenorm|groupnorm|rmsnormalization|prelu|leakyrelu|\\belu\\b|globalaveragepool|globalmaxpool|averagepooling1d|maxpooling1d|globalsumpooling|\\bactivation\\b|\\bsoftmax\\b",
         cls,
         perl = TRUE
       ) &&

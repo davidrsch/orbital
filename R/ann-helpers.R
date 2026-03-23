@@ -94,7 +94,15 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
       "dplyr::if_else({x_expr} >= 0, {x_expr}, 0.22916666666666666 * {x_expr})"
     ),
     "silu" = ,
+    "hard_silu" = ,
     "swish" = glue::glue("{x_expr} * (1 / (1 + exp(-({x_expr}))))"),
+    "exponential" = glue::glue("exp({x_expr})"),
+    "threshold" = {
+      theta <- if (is.null(alpha)) 1.0 else alpha
+      glue::glue(
+        "dplyr::if_else({x_expr} > {format_numeric(theta)}, {x_expr}, 0)"
+      )
+    },
     "softplus" = glue::glue("log(1 + exp({x_expr}))"),
     "mish" = glue::glue("{x_expr} * tanh(log(1 + exp({x_expr})))"),
     "softshrink" = glue::glue(

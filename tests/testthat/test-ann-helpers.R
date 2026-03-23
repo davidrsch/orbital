@@ -265,3 +265,39 @@ test_that("build_mlp_pre_act includes bias even when all weights are zero", {
   # Only the bias term should remain; no input variable references
   expect_false(grepl("\\ba\\b|\\bb\\b", result[1]))
 })
+
+test_that("activation_expr: exponential returns exp(x)", {
+  expr <- activation_expr("exponential", "z")
+  expect_match(expr, "exp")
+  df <- data.frame(z = c(-1, 0, 1, 2))
+  result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
+  expect_equal(result, exp(c(-1, 0, 1, 2)), tolerance = 1e-8)
+})
+
+test_that("activation_expr: threshold zeroes values at or below threshold", {
+  expr <- activation_expr("threshold", "z")
+  # Default threshold = 1.0, default value = 0
+  expect_match(expr, "if_else")
+  df <- data.frame(z = c(-1, 0, 1, 1.5, 2))
+  result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
+  # x > 1 → passthrough; x <= 1 → 0
+  expect_equal(result, c(0, 0, 0, 1.5, 2))
+})
+
+test_that("activation_expr: threshold respects custom alpha", {
+  expr <- activation_expr("threshold", "z", alpha = 2.0)
+  df <- data.frame(z = c(-1, 1, 2, 2.5, 3))
+  result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
+  # x > 2 → passthrough; x <= 2 → 0
+  expect_equal(result, c(0, 0, 0, 2.5, 3))
+})
+
+test_that("activation_expr: hard_silu is alias for hard_swish", {
+  expr_hard_silu <- activation_expr("hard_silu", "z")
+  expr_hard_swish <- activation_expr("hard_swish", "z")
+  expect_equal(expr_hard_silu, expr_hard_swish)
+  df <- data.frame(z = c(-4, 0, 4))
+  r_hard_silu <- dplyr::mutate(df, r = !!rlang::parse_expr(expr_hard_silu))$r
+  r_hard_swish <- dplyr::mutate(df, r = !!rlang::parse_expr(expr_hard_swish))$r
+  expect_equal(r_hard_silu, r_hard_swish, tolerance = 1e-8)
+})
