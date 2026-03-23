@@ -1,6 +1,29 @@
 # Helper functions for artificial neural network (MLP) model implementations
 # Used by model-nnet.R, model-brulee.R, model-keras.R, model-h2o.R, model-kerasnip.R
 
+# Build an inline dplyr/SQL-portable expression string for erf(z_expr).
+# Uses the Abramowitz & Stegun (1964) §7.1.28 polynomial approximation;
+# maximum absolute error < 1.5e-7.
+# This mirrors the Python orbital._erf_approx() helper in erf.py.
+.erf_approx_expr <- function(z_expr) {
+    t <- glue::glue("(1.0 / (1.0 + 0.3275911 * abs({z_expr})))")
+    poly <- glue::glue(
+        "({t} * (0.254829592 + {t} * (-0.284496736 + {t} * (1.421413741 + {t} * (-1.453152027 + {t} * 1.061405429)))))"
+    )
+    glue::glue(
+        "dplyr::if_else(({z_expr}) >= 0.0, 1.0, -1.0) * (1.0 - {poly} * exp(-({z_expr})^2))"
+    )
+}
+
+# Build an inline expression for GELU using the exact erf form:
+# gelu(x) = x * 0.5 * (1 + erf(x / sqrt(2)))
+# where 1/sqrt(2) = 0.7071067811865476.
+.gelu_exact_expr <- function(x_expr) {
+    z <- glue::glue("({x_expr}) * 0.7071067811865476")
+    erf_z <- .erf_approx_expr(z)
+    glue::glue("({x_expr}) * 0.5 * (1.0 + ({erf_z}))")
+}
+
 activation_expr <- function(activation, x_expr, alpha = NULL) {
     switch(
         activation,
@@ -29,7 +52,13 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
         "selu" = glue::glue(
             "dplyr::if_else({x_expr} > 0, 1.0507009873554805 * {x_expr}, 1.7580992881257667 * (exp({x_expr}) - 1))"
         ),
-        "gelu" = glue::glue(
+        # Exact GELU (default in Keras3 / PyTorch approximate=False):
+        # gelu(x) = x * 0.5 * (1 + erf(x/sqrt(2))) via A&S 7.1.28 polynomial.
+        "gelu" = .gelu_exact_expr(x_expr),
+        # Tanh-approximation GELU (PyTorch approximate="tanh" / brulee):
+        # gelu_approx(x) = x * 0.5 * (1 + tanh(sqrt(2/pi) * (x + 0.044715*x^3)))
+        "gelu_approximate" = ,
+        "gelu_tanh" = glue::glue(
             "{x_expr} * 0.5 * (1 + tanh(({x_expr} + 0.044715 * {x_expr}^3) * 0.7978845608028654))"
         ),
         "hardshrink" = glue::glue(
@@ -72,6 +101,14 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
         ),
         "softsign" = glue::glue("{x_expr} / (1 + abs({x_expr}))"),
         "tanhshrink" = glue::glue("{x_expr} - tanh({x_expr})"),
+        # NOTE: "softmax" and "log_softmax" are intentionally omitted here.
+        # Both functions normalise across *all* units simultaneously and therefore
+        # cannot be expressed as independent per-unit scalar expressions.
+        # They are handled structurally in the DAG path (orbital_keras_dag_impl)
+        # via a dedicated softmax / log_softmax block that builds the shared
+        # sum-of-exponentials intermediate expression.  Passing either name to
+        # this function from Dense-layer activation strings raises an informative
+        # error to guide the caller toward the correct layer-level approach.
         "log_softmax" = cli::cli_abort(
             c(
                 "Activation {.val log_softmax} cannot be applied as a per-unit scalar expression.",

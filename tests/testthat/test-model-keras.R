@@ -970,7 +970,7 @@ test_that("keras3 GroupNormalization num_groups == n_features (singleton groups)
     expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
 })
 
-test_that("keras3 GroupNormalization with unsupported num_groups errors gracefully", {
+test_that("keras3 GroupNormalization general num_groups (groups=4, 8 features) is supported", {
     skip_if_not_installed("keras3")
     skip_if_not_installed("reticulate")
     skip_if_not(
@@ -980,9 +980,43 @@ test_that("keras3 GroupNormalization with unsupported num_groups errors graceful
     k <- reticulate::import("keras")
     inp <- k$Input(shape = list(4L))
     x <- k$layers$Dense(8L, activation = "relu")(inp)
-    # groups = 4 for 8 features is valid Keras3 GN but not supported by orbital
-    # (orbital only handles groups=1 and groups=n_features)
+    # groups=4 with 8 features: 8 %% 4 == 0, so this is now supported
     x <- k$layers$GroupNormalization(groups = 4L)(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 3L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:4)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    expect_true(any(grepl("orbital_gn_gmean_", names(orb_obj))))
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+test_that("keras3 GroupNormalization with indivisible num_groups errors gracefully", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(8L, activation = "relu")(inp)
+    # groups=3 with 8 features: 8 %% 3 != 0, so this must produce an error
+    x <- k$layers$GroupNormalization(groups = 3L)(x)
     out <- k$layers$Dense(1L)(x)
     model <- k$Model(inputs = inp, outputs = out)
     model$compile(optimizer = "adam", loss = "mse")
@@ -998,7 +1032,7 @@ test_that("keras3 GroupNormalization with unsupported num_groups errors graceful
             mode = "regression",
             feature_names = paste0("x", 1:4)
         ),
-        regexp = "Unsupported GroupNormalization"
+        regexp = "GroupNormalization"
     )
 })
 
@@ -1683,7 +1717,7 @@ test_that("keras3 Functional model with standalone Activation(log_softmax) DAG p
 
 # ── GroupNormalization unsupported groups error (audit rec #5) ───────────────
 
-test_that("keras3 GroupNormalization with unsupported groups raises cli error", {
+test_that("keras3 GroupNormalization general groups=2 predictions match keras3 predict", {
     skip_if_not_installed("keras3")
     skip_if_not_installed("reticulate")
     skip_if_not(
@@ -1693,8 +1727,43 @@ test_that("keras3 GroupNormalization with unsupported groups raises cli error", 
     k <- reticulate::import("keras")
     inp <- k$Input(shape = list(4L))
     x <- k$layers$Dense(8L, activation = "relu")(inp)
-    # groups=2 with 8 channels: neither 1 nor n_channels → unsupported
+    # groups=2 with 8 features: 8 %% 2 == 0, now supported
     x <- k$layers$GroupNormalization(groups = 2L)(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 5L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:4)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    expect_true(any(grepl("orbital_gn_gmean_", names(orb_obj))))
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+test_that("keras3 GroupNormalization with indivisible groups raises cli error", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(8L, activation = "relu")(inp)
+    # groups=5 with 8 features: 8 %% 5 != 0, must error
+    x <- k$layers$GroupNormalization(groups = 5L)(x)
     out <- k$layers$Dense(1L)(x)
     model <- k$Model(inputs = inp, outputs = out)
     model$compile(optimizer = "adam", loss = "mse")
@@ -1709,7 +1778,7 @@ test_that("keras3 GroupNormalization with unsupported groups raises cli error", 
             mode = "regression",
             feature_names = paste0("x", 1:4)
         ),
-        regexp = "GroupNormalization|Unsupported",
+        regexp = "GroupNormalization",
         ignore.case = TRUE
     )
 })

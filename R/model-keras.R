@@ -745,12 +745,93 @@ orbital_keras_dag_impl <- function(
                     unit_names
                 )
                 assign(lname, unit_names, envir = expr_reg)
+            } else if (n_feat %% num_groups == 0L) {
+                # General case: divide n_feat features into num_groups equal groups,
+                # normalising within each group independently (matches Python impl).
+                group_size <- n_feat %/% num_groups
+                result_exprs <- character(0L)
+                result_names <- character(0L)
+                unit_nms_all <- character(0L)
+                expr_bt <- backtick(in_exprs)
+
+                for (g in seq_len(num_groups)) {
+                    g0 <- g - 1L
+                    start <- g0 * group_size + 1L
+                    end <- start + group_size - 1L
+                    g_cols <- expr_bt[start:end]
+                    k_g <- as.numeric(group_size)
+
+                    mean_nm <- paste0("orbital_gn_gmean_", lname, "_g", g)
+                    var_nm <- paste0("orbital_gn_gvar_", lname, "_g", g)
+
+                    mean_expr_g <- paste0(
+                        "(",
+                        paste(g_cols, collapse = " + "),
+                        ") / ",
+                        k_g
+                    )
+                    var_parts_g <- paste0("(", g_cols, " - `", mean_nm, "`)^2")
+                    var_expr_g <- paste0(
+                        "(",
+                        paste(var_parts_g, collapse = " + "),
+                        ") / ",
+                        k_g
+                    )
+
+                    unit_names_g <- paste0(
+                        "orbital_gn_",
+                        lname,
+                        "_h",
+                        seq(start, end)
+                    )
+                    unit_nms_all <- c(unit_nms_all, unit_names_g)
+
+                    # Capture loop variables for use inside vapply closure
+                    local({
+                        .mean_nm <- mean_nm
+                        .var_nm <- var_nm
+                        .start <- start
+                        .in_exprs <- in_exprs
+                        .gamma <- gamma
+                        .beta <- beta
+                        .eps <- eps
+                        .unit_names_g <- unit_names_g
+                        norm_exprs_g <<- vapply(
+                            seq_along(.unit_names_g),
+                            function(i_local) {
+                                c_idx <- .start + i_local - 1L
+                                xe <- backtick(.in_exprs[[c_idx]])
+                                glue::glue(
+                                    "(({xe} - `{.mean_nm}`) / sqrt(`{.var_nm}` + {format_numeric(.eps)})) * {format_numeric(.gamma[c_idx])} + {format_numeric(.beta[c_idx])}"
+                                )
+                            },
+                            character(1L)
+                        )
+                    })
+
+                    result_names <- c(
+                        result_names,
+                        mean_nm,
+                        var_nm,
+                        unit_names_g
+                    )
+                    result_exprs <- c(
+                        result_exprs,
+                        mean_expr_g,
+                        var_expr_g,
+                        norm_exprs_g
+                    )
+                }
+
+                all_exprs[[lname]] <- stats::setNames(
+                    result_exprs,
+                    result_names
+                )
+                assign(lname, unit_nms_all, envir = expr_reg)
             } else {
                 cli::cli_abort(c(
-                    "Unsupported GroupNormalization configuration in Keras model: \\
-{.val {lname}} has {num_groups} groups for {n_feat} features.",
-                    "i" = "orbital supports GroupNormalization with num_groups = 1 \\
-(LayerNorm equivalent) or num_groups = n_channels."
+                    "Unsupported GroupNormalization configuration in Keras model: {.val {lname}} has {num_groups} groups for {n_feat} features.",
+                    "i" = "num_groups must evenly divide the number of features ({n_feat} %% {num_groups} != 0)."
                 ))
             }
         } else if (grepl("\\bsoftmax\\b", cls, perl = TRUE)) {

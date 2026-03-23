@@ -64,14 +64,19 @@ test_that("activation_expr: selu uses correct scale constants", {
 
 test_that("activation_expr: gelu produces correct values", {
     expr <- activation_expr("gelu", "z")
-    expect_match(expr, "tanh|erf", perl = TRUE)
+    # activation_expr("gelu") uses the exact-erf form (A&S 7.1.28 approximation).
+    # The expression contains the 1/sqrt(2) scale constant for the erf argument.
+    expect_match(expr, "0.7071067811865476")
     df <- data.frame(z = c(0, 1, -1))
     result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
-    # Use the same tanh approximation formula for expected values
-    gelu_approx <- function(z) {
-        z * 0.5 * (1 + tanh((z + 0.044715 * z^3) * 0.7978845608028654))
+    # Reference values from the exact GELU definition using base-R pnorm:
+    # gelu(z) = z * 0.5 * (1 + erf(z / sqrt(2))), erf(x) = 2*pnorm(x*sqrt(2)) - 1
+    gelu_exact_ref <- function(z) {
+        erf_z <- 2 * pnorm(z * sqrt(2)) - 1
+        z * 0.5 * (1 + erf_z)
     }
-    expect_equal(result, gelu_approx(c(0, 1, -1)), tolerance = 1e-8)
+    # Tolerance 1e-5 covers the A&S polynomial approximation error (~1.5e-7)
+    expect_equal(result, gelu_exact_ref(c(0, 1, -1)), tolerance = 1e-5)
     # Qualitative checks: gelu(0)=0, gelu(1)>0, gelu(-1)<0
     expect_equal(result[1], 0, tolerance = 1e-8)
     expect_true(result[2] > 0.8)
