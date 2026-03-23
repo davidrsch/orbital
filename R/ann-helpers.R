@@ -109,6 +109,17 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
         # sum-of-exponentials intermediate expression.  Passing either name to
         # this function from Dense-layer activation strings raises an informative
         # error to guide the caller toward the correct layer-level approach.
+        "softmax" = cli::cli_abort(
+            c(
+                "Activation {.val softmax} cannot be applied as a per-unit scalar expression.",
+                "i" = paste(
+                    "softmax normalises across all units simultaneously.",
+                    "Use a standalone {.cls Activation(\"softmax\")} layer or a",
+                    "standalone {.cls Softmax} layer placed after a linear Dense layer."
+                ),
+                "i" = "The DAG path in orbital handles standalone Softmax layers and Activation('softmax') correctly."
+            )
+        ),
         "log_softmax" = cli::cli_abort(
             c(
                 "Activation {.val log_softmax} cannot be applied as a per-unit scalar expression.",
