@@ -199,6 +199,35 @@ test_that("activation_expr: tanhshrink returns x - tanh(x)", {
     expect_equal(result, c(-1, 0, 1) - tanh(c(-1, 0, 1)), tolerance = 1e-6)
 })
 
+test_that("activation_expr: gelu_approximate (tanh-approx GELU) correct values", {
+    expr_approx <- activation_expr("gelu_approximate", "z")
+    expr_tanh <- activation_expr("gelu_tanh", "z")
+    # Both aliases must produce the same expression
+    expect_equal(expr_approx, expr_tanh)
+    # The expression must contain the sqrt(2/pi) constant
+    expect_match(expr_approx, "0.7978845608028654")
+    df <- data.frame(z = c(0, 1, -1, 2))
+    result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr_approx))$r
+    # tanh-approximation: x * 0.5 * (1 + tanh(sqrt(2/pi) * (x + 0.044715*x^3)))
+    gelu_tanh_ref <- function(z) {
+        z * 0.5 * (1 + tanh(0.7978845608028654 * (z + 0.044715 * z^3)))
+    }
+    expect_equal(result, gelu_tanh_ref(c(0, 1, -1, 2)), tolerance = 1e-7)
+    # gelu_approximate(0) = 0
+    expect_equal(result[1], 0, tolerance = 1e-9)
+})
+
+test_that("activation_expr: rrelu uses fixed mid-point slope 11/48", {
+    expr <- activation_expr("rrelu", "z")
+    expect_match(expr, "0.22916666666666666")
+    df <- data.frame(z = c(-2, 0, 3))
+    result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
+    # positive: passthrough; negative: slope = 11/48 ≈ 0.229166…
+    expect_equal(result[3], 3, tolerance = 1e-9)
+    expect_equal(result[1], -2 * (11 / 48), tolerance = 1e-8)
+    expect_equal(result[2], 0, tolerance = 1e-9)
+})
+
 test_that("activation_expr: log_softmax raises informative error (requires DAG path)", {
     expect_error(
         activation_expr("log_softmax", "z"),

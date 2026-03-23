@@ -46,9 +46,10 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
         "celu" = {
             a <- if (is.null(alpha)) 1.0 else alpha
             glue::glue(
-                "pmax(0, {x_expr}) + pmin(0, {format_numeric(a)} * (exp({x_expr} / {format_numeric(a)}) - 1))"
+                "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * (exp({x_expr} / {format_numeric(a)}) - 1))"
             )
         },
+        # 1.7580992881257667 = SELU_GAMMA (1.0507009873554805) * SELU_ALPHA (1.6732631921768188)
         "selu" = glue::glue(
             "dplyr::if_else({x_expr} > 0, 1.0507009873554805 * {x_expr}, 1.7580992881257667 * (exp({x_expr}) - 1))"
         ),
