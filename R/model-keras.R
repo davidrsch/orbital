@@ -366,6 +366,58 @@ orbital_keras_dag_impl <- function(
                     envir = expr_reg
                 )
             }
+        } else if (grepl("leakyrelu", cls)) {
+            # Standalone LeakyReLU layer (keras.src.layers.activation.leaky_relu.*)
+            # Must be checked BEFORE the generic \bactivation\b branch because the
+            # module path contains the word "activation".
+            inbound <- topo_map[[lname]]
+            in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+            slope <- tryCatch(
+                as.numeric(l$get_config()$negative_slope),
+                error = function(e) 0.01
+            )
+            if (is.null(slope) || is.na(slope)) {
+                slope <- 0.01
+            }
+            unit_names <- paste0(
+                "orbital_leakyrelu_",
+                lname,
+                "_h",
+                seq_along(in_exprs)
+            )
+            lr_exprs <- vapply(
+                in_exprs,
+                function(e) activation_expr("leaky_relu", e, alpha = slope),
+                character(1)
+            )
+            all_exprs[[lname]] <- stats::setNames(lr_exprs, unit_names)
+            assign(lname, unit_names, envir = expr_reg)
+        } else if (grepl("\\belu\\b", cls, perl = TRUE)) {
+            # Standalone ELU layer (keras.src.layers.activation.elu.ELU).
+            # The \belu\b word-boundary pattern does NOT match selu, celu, relu,
+            # prelu, or leakyrelu, so this branch is safe to place after leakyrelu.
+            inbound <- topo_map[[lname]]
+            in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+            alpha_val <- tryCatch(
+                as.numeric(l$get_config()$alpha),
+                error = function(e) 1.0
+            )
+            if (is.null(alpha_val) || is.na(alpha_val)) {
+                alpha_val <- 1.0
+            }
+            unit_names <- paste0(
+                "orbital_elu_",
+                lname,
+                "_h",
+                seq_along(in_exprs)
+            )
+            elu_exprs <- vapply(
+                in_exprs,
+                function(e) activation_expr("elu", e, alpha = alpha_val),
+                character(1)
+            )
+            all_exprs[[lname]] <- stats::setNames(elu_exprs, unit_names)
+            assign(lname, unit_names, envir = expr_reg)
         } else if (grepl("\\bactivation\\b", cls, perl = TRUE)) {
             # Standalone Activation layer: apply activation function to inbound expressions
             inbound <- topo_map[[lname]]
@@ -391,10 +443,27 @@ orbital_keras_dag_impl <- function(
             }
             if (activation %in% c("softmax", "log_softmax")) {
                 expr_bt <- backtick(in_exprs)
+                # Max-stabilisation: subtract max(logits) before exp() so that
+                # exp() never overflows and results are numerically identical to
+                # the unstabilised form (the shift cancels in both softmax and
+                # log_softmax).
+                max_nm <- paste0("orbital_act_sm_max_", lname)
+                max_expr <- paste0(
+                    "do.call(pmax, list(",
+                    paste(expr_bt, collapse = ", "),
+                    "))"
+                )
                 sm_sum_nm <- paste0("orbital_act_sm_sum_", lname)
                 sm_sum_expr <- paste0(
                     "(",
-                    paste0("exp(", expr_bt, ")", collapse = " + "),
+                    paste0(
+                        "exp(",
+                        expr_bt,
+                        " - `",
+                        max_nm,
+                        "`)",
+                        collapse = " + "
+                    ),
                     ")"
                 )
                 unit_names <- paste0(
@@ -407,20 +476,38 @@ orbital_keras_dag_impl <- function(
                     vapply(
                         seq_along(in_exprs),
                         function(i) {
-                            paste0("exp(", expr_bt[i], ") / `", sm_sum_nm, "`")
+                            paste0(
+                                "exp(",
+                                expr_bt[i],
+                                " - `",
+                                max_nm,
+                                "`) / `",
+                                sm_sum_nm,
+                                "`"
+                            )
                         },
                         character(1)
                     )
                 } else {
+                    # log_softmax = (x_i - max) - log(sum(exp(x_j - max)))
                     vapply(
                         seq_along(in_exprs),
                         function(i) {
-                            paste0(expr_bt[i], " - log(`", sm_sum_nm, "`)")
+                            paste0(
+                                "(",
+                                expr_bt[i],
+                                " - `",
+                                max_nm,
+                                "`) - log(`",
+                                sm_sum_nm,
+                                "`)"
+                            )
                         },
                         character(1)
                     )
                 }
                 all_exprs[[lname]] <- c(
+                    stats::setNames(max_expr, max_nm),
                     stats::setNames(sm_sum_expr, sm_sum_nm),
                     stats::setNames(sm_exprs, unit_names)
                 )
@@ -667,14 +754,29 @@ orbital_keras_dag_impl <- function(
                 ))
             }
         } else if (grepl("\\bsoftmax\\b", cls, perl = TRUE)) {
-            # Standalone Softmax layer: row-wise softmax normalisation
+            # Standalone Softmax layer: row-wise softmax normalisation (max-stabilised)
+            # Subtracting the row-wise max before exp() prevents overflow for large logits
+            # and does not change the result (the shift cancels in numerator and denominator).
             inbound <- topo_map[[lname]]
             in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
             expr_bt <- backtick(in_exprs)
+            sm_max_nm <- paste0("orbital_sm_max_", lname)
+            sm_max_expr <- paste0(
+                "do.call(pmax, list(",
+                paste(expr_bt, collapse = ", "),
+                "))"
+            )
             sm_sum_nm <- paste0("orbital_sm_sum_", lname)
             sm_sum_expr <- paste0(
                 "(",
-                paste0("exp(", expr_bt, ")", collapse = " + "),
+                paste0(
+                    "exp(",
+                    expr_bt,
+                    " - `",
+                    sm_max_nm,
+                    "`)",
+                    collapse = " + "
+                ),
                 ")"
             )
             unit_names <- paste0(
@@ -685,10 +787,21 @@ orbital_keras_dag_impl <- function(
             )
             sm_exprs <- vapply(
                 seq_along(in_exprs),
-                function(i) paste0("exp(", expr_bt[i], ") / `", sm_sum_nm, "`"),
+                function(i) {
+                    paste0(
+                        "exp(",
+                        expr_bt[i],
+                        " - `",
+                        sm_max_nm,
+                        "`) / `",
+                        sm_sum_nm,
+                        "`"
+                    )
+                },
                 character(1)
             )
             all_exprs[[lname]] <- c(
+                stats::setNames(sm_max_expr, sm_max_nm),
                 stats::setNames(sm_sum_expr, sm_sum_nm),
                 stats::setNames(sm_exprs, unit_names)
             )
@@ -775,7 +888,7 @@ orbital_keras_impl <- function(
         function(l) {
             cls <- tolower(class(l)[1L])
             grepl(
-                "\\badd\\b|concatenate|batchnorm|layernorm|instancenorm|groupnorm|prelu|globalaveragepool|globalmaxpool|averagepooling1d|maxpooling1d|globalsumpooling|\\bactivation\\b|\\bsoftmax\\b",
+                "\\badd\\b|concatenate|batchnorm|layernorm|instancenorm|groupnorm|prelu|leakyrelu|\\belu\\b|globalaveragepool|globalmaxpool|averagepooling1d|maxpooling1d|globalsumpooling|\\bactivation\\b|\\bsoftmax\\b",
                 cls,
                 perl = TRUE
             ) &&

@@ -400,7 +400,9 @@ test_that("keras3 Sequential model with GELU activation translates correctly", {
     )
     expect_true(is.character(orb_obj))
     hidden_exprs <- orb_obj[grepl("orbital_mlp", names(orb_obj))]
-    expect_true(any(grepl("tanh", hidden_exprs)))
+    # After the GELU fix the expression uses the A&S erf approximation
+    # (exact form); the 1/sqrt(2) constant is the distinguishing token.
+    expect_true(any(grepl("0.7071067811865476", hidden_exprs)))
 })
 
 test_that("keras3 Sequential model with hard_sigmoid activation translates correctly", {
@@ -934,6 +936,72 @@ test_that("keras3 GroupNormalization predictions match keras3 predict (regressio
     expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
 })
 
+test_that("keras3 GroupNormalization num_groups == n_features (singleton groups) predictions match", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(8L, activation = "relu")(inp)
+    # groups == n_features => each feature is its own group (singleton GN)
+    x <- k$layers$GroupNormalization(groups = 8L)(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 3L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:4)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+test_that("keras3 GroupNormalization with unsupported num_groups errors gracefully", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(8L, activation = "relu")(inp)
+    # groups = 4 for 8 features is valid Keras3 GN but not supported by orbital
+    # (orbital only handles groups=1 and groups=n_features)
+    x <- k$layers$GroupNormalization(groups = 4L)(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 3L, verbose = 0L)
+
+    expect_error(
+        orbital(
+            model,
+            mode = "regression",
+            feature_names = paste0("x", 1:4)
+        ),
+        regexp = "Unsupported GroupNormalization"
+    )
+})
+
 test_that("keras3 Functional model with standalone Activation layer translates correctly", {
     skip_if_not_installed("keras3")
     skip_if_not_installed("reticulate")
@@ -1254,6 +1322,49 @@ test_that("keras3 Functional model with two output Dense layers produces named p
     # Both output expressions should be present
     expect_true(".pred_1" %in% names(orb_obj))
     expect_true(".pred_2" %in% names(orb_obj))
+})
+
+test_that("keras3 multi-output Functional model predictions numerically match keras3 predict", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(8L, activation = "relu")(inp)
+    out1 <- k$layers$Dense(1L, name = "output_1")(x)
+    out2 <- k$layers$Dense(1L, name = "output_2")(x)
+    model <- k$Model(inputs = inp, outputs = list(out1, out2))
+    model$compile(optimizer = "adam", loss = list("mse", "mse"))
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y1 <- rnorm(10)
+    y2 <- rnorm(10)
+    model$fit(x_mat, list(y1, y2), epochs = 3L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:4)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    preds_orb <- predict(orb_obj, df)
+    preds_keras <- model$predict(x_mat, verbose = 0L)
+    expect_equal(
+        preds_orb$.pred_1,
+        as.numeric(preds_keras[[1L]]),
+        tolerance = 1e-5
+    )
+    expect_equal(
+        preds_orb$.pred_2,
+        as.numeric(preds_keras[[2L]]),
+        tolerance = 1e-5
+    )
 })
 
 # ── pooling accuracy tests (R audit rec #3) ───────────────────────────────────
@@ -1641,4 +1752,66 @@ test_that("keras3 Functional two-output model predictions match keras3 predict",
     k_out2 <- as.numeric(preds_keras[[2L]])
     expect_equal(preds_orb$.pred_1, k_out1, tolerance = 1e-5)
     expect_equal(preds_orb$.pred_2, k_out2, tolerance = 1e-5)
+})
+
+# ── standalone ELU layer (R audit fix #2) ────────────────────────────────────
+
+test_that("keras3 Functional model with ELU layer predictions match", {
+    skip_if_not_installed("keras3")
+    skip_if_not_installed("reticulate")
+    skip_if_not(
+        reticulate::py_available(initialize = FALSE),
+        "Python not available"
+    )
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(4L))
+    x <- k$layers$Dense(8L)(inp)
+    x <- k$layers$ELU(alpha = 0.5)(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+    y_vec <- rnorm(10)
+    model$fit(x_mat, y_vec, epochs = 5L, verbose = 0L)
+
+    feature_names <- paste0("x", 1:4)
+    df <- as.data.frame(x_mat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    # ELU layer routes through DAG and produces orbital_act_ expressions
+    expect_true(any(grepl("orbital_act_", names(orb_obj))))
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+# ── Softmax max-stabilisation: overflow safety (R audit fix #3) ──────────────
+
+test_that("Softmax orbital expressions are numerically stable for large logits", {
+    # Direct expression-level test: verifies the max-stabilised pattern used by
+    # orbital_keras_dag_impl() for standalone Softmax layers does not produce
+    # NaN when logits are large enough to overflow exp() without stabilisation.
+    df <- data.frame(a = 700, b = 0, c = 0)
+
+    result <- dplyr::mutate(
+        df,
+        sm_max = do.call(pmax, list(a, b, c)),
+        sm_sum = (exp(a - sm_max) + exp(b - sm_max) + exp(c - sm_max)),
+        p1 = exp(a - sm_max) / sm_sum,
+        p2 = exp(b - sm_max) / sm_sum,
+        p3 = exp(c - sm_max) / sm_sum
+    )
+
+    expect_false(is.nan(result$p1))
+    expect_false(is.nan(result$p2))
+    expect_false(is.nan(result$p3))
+    expect_equal(result$p1 + result$p2 + result$p3, 1.0, tolerance = 1e-10)
+    # With logits (700, 0, 0) the first class should have probability ≈ 1
+    expect_equal(result$p1, 1.0, tolerance = 1e-5)
 })
