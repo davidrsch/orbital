@@ -22,7 +22,7 @@ test_that("activation_expr: sigmoid maps to (0, 1)", {
 
 test_that("activation_expr: tanh produces correct values", {
   expr <- activation_expr("tanh", "z")
-  expect_match(expr, "exp")
+  expect_match(expr, "tanh")
   df <- data.frame(z = c(-1, 0, 1))
   result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
   expect_equal(result, tanh(c(-1, 0, 1)), tolerance = 1e-6)
@@ -70,9 +70,10 @@ test_that("activation_expr: gelu produces correct values", {
   df <- data.frame(z = c(0, 1, -1))
   result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
   # Reference values from the exact GELU definition using base-R pnorm:
-  # gelu(z) = z * 0.5 * (1 + erf(z / sqrt(2))), erf(x) = 2*pnorm(x*sqrt(2)) - 1
+  # gelu(z) = z * 0.5 * (1 + erf(z / sqrt(2)))
+  # erf(z/sqrt(2)) = 2*pnorm(z) - 1  (since pnorm(x) = 0.5*(1 + erf(x/sqrt(2))))
   gelu_exact_ref <- function(z) {
-    erf_z <- 2 * pnorm(z * sqrt(2)) - 1
+    erf_z <- 2 * pnorm(z) - 1
     z * 0.5 * (1 + erf_z)
   }
   # Tolerance 1e-5 covers the A&S polynomial approximation error (~1.5e-7)

@@ -51,7 +51,7 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
     },
     # 1.7580992881257667 = SELU_GAMMA (1.0507009873554805) * SELU_ALPHA (1.6732631921768188)
     "selu" = glue::glue(
-      "dplyr::if_else({x_expr} > 0, 1.0507009873554805 * {x_expr}, 1.7580992881257667 * (exp({x_expr}) - 1))"
+      "dplyr::if_else({x_expr} > 0, 1.0507009873554805 * {x_expr}, 1.7580992881257671 * (exp({x_expr}) - 1))"
     ),
     # Exact GELU (default in Keras3 / PyTorch approximate=False):
     # gelu(x) = x * 0.5 * (1 + erf(x/sqrt(2))) via A&S 7.1.28 polynomial.
@@ -76,6 +76,7 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
     "hardtanh" = glue::glue(
       "dplyr::if_else({x_expr} < -1, -1, dplyr::if_else({x_expr} > 1, 1, {x_expr}))"
     ),
+    "hard_silu" = ,
     "hard_swish" = ,
     "hardswish" = glue::glue(
       "{x_expr} * dplyr::if_else({x_expr} <= -3, 0, dplyr::if_else({x_expr} >= 3, 1, ({x_expr} + 3) / 6))"
@@ -94,7 +95,6 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
       "dplyr::if_else({x_expr} >= 0, {x_expr}, 0.22916666666666666 * {x_expr})"
     ),
     "silu" = ,
-    "hard_silu" = ,
     "swish" = glue::glue("{x_expr} * (1 / (1 + exp(-({x_expr}))))"),
     "exponential" = glue::glue("exp({x_expr})"),
     "threshold" = {

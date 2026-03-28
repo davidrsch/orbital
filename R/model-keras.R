@@ -157,6 +157,290 @@ orbital_keras_dag_impl <- function(
   out_pre_act <- NULL # used for single-output models
   out_pre_act_map <- list() # layer_name -> pre_act, for multi-output models
 
+  # Helper: unroll a single LSTM or GRU layer into SQL expressions.
+  # Returns list(nms, exprs, out_nms, all_H_nms, T, H).
+  .unroll_rnn <- function(ul, ul_in_exprs, ul_pfx) {
+    inner_cls <- tolower(class(ul)[1L])
+    is_lstm_inner <- grepl("\\blstm\\b", inner_cls, perl = TRUE)
+    ul_wts <- ul$get_weights()
+    ul_cfg <- tryCatch(ul$get_config(), error = function(e) list())
+    ul_return_seq <- isTRUE(
+      tryCatch(as.logical(ul_cfg$return_sequences), error = function(e) FALSE)
+    )
+    ul_gate_act <- tryCatch(
+      tolower(as.character(ul_cfg$recurrent_activation %||% "sigmoid")),
+      error = function(e) "sigmoid"
+    )
+    ul_cell_act <- tryCatch(
+      tolower(as.character(ul_cfg$activation %||% "tanh")),
+      error = function(e) "tanh"
+    )
+
+    if (is_lstm_inner) {
+      ul_kernel <- ul_wts[[1L]] # (I, 4H)
+      ul_rkernel <- ul_wts[[2L]] # (H, 4H)
+      ul_H <- as.integer(ncol(ul_kernel) / 4L)
+      ul_I <- nrow(ul_kernel)
+      ul_T <- as.integer(length(ul_in_exprs) / ul_I)
+      ul_bias <- if (length(ul_wts) >= 3L) {
+        as.numeric(ul_wts[[3L]])
+      } else {
+        numeric(4L * ul_H)
+      }
+      ul_g_offs <- c(0L, ul_H, 2L * ul_H, 3L * ul_H)
+      ul_W <- lapply(seq_along(ul_g_offs), function(g) {
+        t(ul_kernel[, (ul_g_offs[g] + 1L):(ul_g_offs[g] + ul_H)])
+      })
+      ul_R <- lapply(seq_along(ul_g_offs), function(g) {
+        t(ul_rkernel[, (ul_g_offs[g] + 1L):(ul_g_offs[g] + ul_H)])
+      })
+      ul_B <- lapply(seq_along(ul_g_offs), function(g) {
+        as.numeric(ul_bias[(ul_g_offs[g] + 1L):(ul_g_offs[g] + ul_H)])
+      })
+
+      nms <- character(0L)
+      exprs <- character(0L)
+      all_H_nms <- list()
+      H_prev <- NULL
+      C_prev <- NULL
+      for (t in seq_len(ul_T)) {
+        xt <- ul_in_exprs[((t - 1L) * ul_I + 1L):(t * ul_I)]
+        pg <- lapply(seq_along(ul_g_offs), function(g) {
+          inp <- build_mlp_pre_act(ul_W[[g]], ul_B[[g]], xt)
+          if (is.null(H_prev)) {
+            inp
+          } else {
+            paste0(
+              "(",
+              inp,
+              " + ",
+              build_mlp_pre_act(ul_R[[g]], numeric(ul_H), H_prev),
+              ")"
+            )
+          }
+        })
+        aI <- vapply(
+          pg[[1L]],
+          function(e) activation_expr(ul_gate_act, e),
+          character(1L)
+        )
+        aF <- vapply(
+          pg[[2L]],
+          function(e) activation_expr(ul_gate_act, e),
+          character(1L)
+        )
+        aC <- vapply(
+          pg[[3L]],
+          function(e) activation_expr(ul_cell_act, e),
+          character(1L)
+        )
+        aO <- vapply(
+          pg[[4L]],
+          function(e) activation_expr(ul_gate_act, e),
+          character(1L)
+        )
+        C_nms <- paste0(ul_pfx, "_C_t", t, "_h", seq_len(ul_H))
+        C_exprs_t <- if (is.null(C_prev)) {
+          paste0("(", aI, " * ", aC, ")")
+        } else {
+          paste0("(", aF, " * ", backtick(C_prev), " + ", aI, " * ", aC, ")")
+        }
+        H_nms <- paste0(ul_pfx, "_H_t", t, "_h", seq_len(ul_H))
+        H_exprs_t <- paste0("(", aO, " * tanh(", backtick(C_nms), "))")
+        nms <- c(nms, C_nms, H_nms)
+        exprs <- c(exprs, C_exprs_t, H_exprs_t)
+        all_H_nms[[t]] <- H_nms
+        H_prev <- H_nms
+        C_prev <- C_nms
+      }
+      out_nms <- if (ul_return_seq) {
+        unlist(all_H_nms, use.names = FALSE)
+      } else {
+        H_prev
+      }
+      list(
+        nms = nms,
+        exprs = exprs,
+        out_nms = out_nms,
+        all_H_nms = all_H_nms,
+        T = ul_T,
+        H = ul_H
+      )
+    } else {
+      # GRU
+      ul_kernel <- ul_wts[[1L]] # (I, 3H)
+      ul_rkernel <- ul_wts[[2L]] # (H, 3H)
+      ul_H <- as.integer(ncol(ul_kernel) / 3L)
+      ul_I <- nrow(ul_kernel)
+      ul_T <- as.integer(length(ul_in_exprs) / ul_I)
+      if (length(ul_wts) >= 3L) {
+        raw_b <- ul_wts[[3L]]
+        if (!is.null(dim(raw_b)) && length(dim(raw_b)) == 2L) {
+          ul_b_inp <- as.numeric(raw_b[1L, ])
+          ul_b_rec <- as.numeric(raw_b[2L, ])
+        } else {
+          ba <- as.numeric(raw_b)
+          ul_b_inp <- ba[seq_len(3L * ul_H)]
+          ul_b_rec <- ba[seq_len(3L * ul_H) + 3L * ul_H]
+        }
+      } else {
+        ul_b_inp <- numeric(3L * ul_H)
+        ul_b_rec <- numeric(3L * ul_H)
+      }
+      ul_reset_after <- isTRUE(
+        tryCatch(as.logical(ul_cfg$reset_after), error = function(e) TRUE)
+      )
+      ul_g_offs <- c(0L, ul_H, 2L * ul_H)
+      ul_B_comb <- lapply(seq_along(ul_g_offs), function(g) {
+        idx <- (ul_g_offs[g] + 1L):(ul_g_offs[g] + ul_H)
+        ul_b_inp[idx] + ul_b_rec[idx]
+      })
+      ul_W <- lapply(seq_along(ul_g_offs), function(g) {
+        t(ul_kernel[, (ul_g_offs[g] + 1L):(ul_g_offs[g] + ul_H)])
+      })
+      ul_R <- lapply(seq_along(ul_g_offs), function(g) {
+        t(ul_rkernel[, (ul_g_offs[g] + 1L):(ul_g_offs[g] + ul_H)])
+      })
+
+      nms <- character(0L)
+      exprs <- character(0L)
+      all_H_nms <- list()
+      H_prev <- NULL
+      for (t in seq_len(ul_T)) {
+        xt <- ul_in_exprs[((t - 1L) * ul_I + 1L):(t * ul_I)]
+        z_pre <- {
+          inp <- build_mlp_pre_act(ul_W[[1L]], ul_B_comb[[1L]], xt)
+          if (is.null(H_prev)) {
+            inp
+          } else {
+            paste0(
+              "(",
+              inp,
+              " + ",
+              build_mlp_pre_act(ul_R[[1L]], numeric(ul_H), H_prev),
+              ")"
+            )
+          }
+        }
+        r_pre <- {
+          inp <- build_mlp_pre_act(ul_W[[2L]], ul_B_comb[[2L]], xt)
+          if (is.null(H_prev)) {
+            inp
+          } else {
+            paste0(
+              "(",
+              inp,
+              " + ",
+              build_mlp_pre_act(ul_R[[2L]], numeric(ul_H), H_prev),
+              ")"
+            )
+          }
+        }
+        z_nms_t <- paste0(ul_pfx, "_z_t", t, "_h", seq_len(ul_H))
+        r_nms_t <- paste0(ul_pfx, "_r_t", t, "_h", seq_len(ul_H))
+        z_exprs_t <- vapply(
+          z_pre,
+          function(e) activation_expr(ul_gate_act, e),
+          character(1L)
+        )
+        r_exprs_t <- vapply(
+          r_pre,
+          function(e) activation_expr(ul_gate_act, e),
+          character(1L)
+        )
+        h_idx <- (ul_g_offs[3L] + 1L):(ul_g_offs[3L] + ul_H)
+        h_inp <- build_mlp_pre_act(
+          ul_W[[3L]],
+          if (ul_reset_after) ul_b_inp[h_idx] else ul_B_comb[[3L]],
+          xt
+        )
+        ul_R_h <- ul_R[[3L]] # (H, H)
+        ht_exprs_t <- vapply(
+          seq_len(ul_H),
+          function(h) {
+            if (is.null(H_prev)) {
+              activation_expr(ul_cell_act, h_inp[h])
+            } else if (ul_reset_after) {
+              rec_sum <- paste(
+                paste0(backtick(H_prev), " * ", format_numeric(ul_R_h[h, ])),
+                collapse = " + "
+              )
+              rec_wb <- paste0(
+                "(",
+                rec_sum,
+                " + ",
+                format_numeric(ul_b_rec[h_idx[h]]),
+                ")"
+              )
+              activation_expr(
+                ul_cell_act,
+                paste0(
+                  "(",
+                  h_inp[h],
+                  " + ",
+                  backtick(r_nms_t[h]),
+                  " * ",
+                  rec_wb,
+                  ")"
+                )
+              )
+            } else {
+              coupled <- paste(
+                paste0(
+                  backtick(r_nms_t),
+                  " * ",
+                  backtick(H_prev),
+                  " * ",
+                  format_numeric(ul_R_h[h, ])
+                ),
+                collapse = " + "
+              )
+              activation_expr(
+                ul_cell_act,
+                paste0("(", h_inp[h], " + ", coupled, ")")
+              )
+            }
+          },
+          character(1L)
+        )
+        ht_nms_t <- paste0(ul_pfx, "_ht_t", t, "_h", seq_len(ul_H))
+        H_nms <- paste0(ul_pfx, "_H_t", t, "_h", seq_len(ul_H))
+        H_cur_exprs <- if (is.null(H_prev)) {
+          paste0("((1 - ", backtick(z_nms_t), ") * ", backtick(ht_nms_t), ")")
+        } else {
+          paste0(
+            "((1 - ",
+            backtick(z_nms_t),
+            ") * ",
+            backtick(ht_nms_t),
+            " + ",
+            backtick(z_nms_t),
+            " * ",
+            backtick(H_prev),
+            ")"
+          )
+        }
+        nms <- c(nms, z_nms_t, r_nms_t, ht_nms_t, H_nms)
+        exprs <- c(exprs, z_exprs_t, r_exprs_t, ht_exprs_t, H_cur_exprs)
+        all_H_nms[[t]] <- H_nms
+        H_prev <- H_nms
+      }
+      out_nms <- if (ul_return_seq) {
+        unlist(all_H_nms, use.names = FALSE)
+      } else {
+        H_prev
+      }
+      list(
+        nms = nms,
+        exprs = exprs,
+        out_nms = out_nms,
+        all_H_nms = all_H_nms,
+        T = ul_T,
+        H = ul_H
+      )
+    }
+  }
+
   for (l in all_layers) {
     cls_orig <- class(l)[1L]
     cls <- tolower(cls_orig)
@@ -199,6 +483,12 @@ orbital_keras_dag_impl <- function(
       }
 
       if (lname %in% output_layer_names) {
+        if (!activation %in% c("linear", "softmax", "log_softmax", "sigmoid")) {
+          cli::cli_warn(c(
+            "Dense output layer {.val {lname}} has activation = {.val {activation}} which orbital will override.",
+            "i" = "orbital applies its own output transform based on {.arg mode}; the Keras activation on the output layer is ignored."
+          ))
+        }
         out_pre_act_map[[lname]] <- pre_act
         if (lname == last_dense) out_pre_act <- pre_act
       } else {
@@ -219,27 +509,34 @@ orbital_keras_dag_impl <- function(
         assign(lname, unit_names, envir = expr_reg)
       }
     } else if (grepl("\\badd\\b", cls, perl = TRUE)) {
-      # Element-wise Add: supports skip / residual connections
+      # Element-wise Add: supports skip / residual connections (>=2 inputs)
       inbound <- topo_map[[lname]]
-      if (is.null(inbound) || length(inbound) != 2L) {
+      if (is.null(inbound) || length(inbound) < 2L) {
         cli::cli_abort(
-          "Keras Add layer {.val {lname}} must have exactly 2 inbound inputs, got {length(inbound)}."
+          "Keras Add layer {.val {lname}} must have at least 2 inbound inputs, got {length(inbound)}."
         )
       }
-      exprs_a <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
-      exprs_b <- get(inbound[2L], envir = expr_reg, inherits = FALSE)
-      if (length(exprs_a) != length(exprs_b)) {
+      all_inbound_exprs <- lapply(inbound, function(nm) {
+        get(nm, envir = expr_reg, inherits = FALSE)
+      })
+      widths <- lengths(all_inbound_exprs)
+      if (length(unique(widths)) != 1L) {
         cli::cli_abort(
-          "Keras Add layer {.val {lname}}: both inputs must have the same width ({length(exprs_a)} vs {length(exprs_b)})."
+          "Keras Add layer {.val {lname}}: all inputs must have the same width (got: {paste(widths, collapse = ', ')})."
         )
       }
-      add_names <- paste0("orbital_", lname, "_h", seq_along(exprs_a))
-      add_exprs <- paste0(
-        "(",
-        backtick(exprs_a),
-        " + ",
-        backtick(exprs_b),
-        ")"
+      add_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
+      add_exprs <- vapply(
+        seq_len(widths[1L]),
+        function(i) {
+          terms <- vapply(
+            all_inbound_exprs,
+            function(e) backtick(e[i]),
+            character(1L)
+          )
+          paste0("(", paste(terms, collapse = " + "), ")")
+        },
+        character(1L)
       )
       all_exprs[[lname]] <- stats::setNames(add_exprs, add_names)
       assign(lname, add_names, envir = expr_reg)
@@ -264,7 +561,7 @@ orbital_keras_dag_impl <- function(
       beta <- as.numeric(wts[[2L]])
       mn <- as.numeric(wts[[3L]])
       vr <- as.numeric(wts[[4L]])
-      eps <- tryCatch(as.numeric(l$epsilon), error = function(e) 1e-5)
+      eps <- tryCatch(as.numeric(l$epsilon), error = function(e) 1e-3)
       unit_names <- paste0(
         "orbital_bn_",
         lname,
@@ -418,6 +715,62 @@ orbital_keras_dag_impl <- function(
       )
       all_exprs[[lname]] <- stats::setNames(elu_exprs, unit_names)
       assign(lname, unit_names, envir = expr_reg)
+    } else if (grepl("\\brelu\\b", cls, perl = TRUE)) {
+      # Standalone ReLU layer (keras.layers.ReLU()): must be checked BEFORE the
+      # generic \bactivation\b branch because the module path contains "activation".
+      # Keras ReLU config: negative_slope (default 0), max_value (default NULL),
+      # threshold (default 0).  Full formula:
+      #   base = if_else(x >= threshold, x - threshold, neg_slope * (x - threshold))
+      #   out  = if max_value set: if_else(base > max_value, max_value, base)
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      ns <- tryCatch(
+        as.numeric(l$get_config()$negative_slope),
+        error = function(e) 0.0
+      )
+      thr <- tryCatch(
+        as.numeric(l$get_config()$threshold),
+        error = function(e) 0.0
+      )
+      if (is.null(ns) || length(ns) == 0L || is.na(ns)) {
+        ns <- 0.0
+      }
+      if (is.null(thr) || length(thr) == 0L || is.na(thr)) {
+        thr <- 0.0
+      }
+      mv_raw <- tryCatch(l$get_config()$max_value, error = function(e) NULL)
+      mv_finite <- !is.null(mv_raw) &&
+        length(mv_raw) > 0L &&
+        !is.na(suppressWarnings(as.numeric(mv_raw)[[1L]]))
+      mv <- if (mv_finite) as.numeric(mv_raw)[[1L]] else NA_real_
+      unit_names <- paste0("orbital_relu_", lname, "_h", seq_along(in_exprs))
+      relu_exprs <- vapply(
+        in_exprs,
+        function(e) {
+          xe <- backtick(e)
+          thr_f <- format_numeric(thr)
+          ns_f <- format_numeric(ns)
+          base <- if (thr == 0.0 && ns == 0.0) {
+            glue::glue("dplyr::if_else({xe} >= 0, {xe}, 0)")
+          } else if (thr == 0.0) {
+            glue::glue("dplyr::if_else({xe} >= 0, {xe}, {ns_f} * {xe})")
+          } else {
+            glue::glue(
+              "dplyr::if_else({xe} >= {thr_f}, {xe} - {thr_f}, {ns_f} * ({xe} - {thr_f}))"
+            )
+          }
+          if (mv_finite) {
+            mv_f <- format_numeric(mv)
+            base <- glue::glue(
+              "dplyr::if_else({base} > {mv_f}, {mv_f}, {base})"
+            )
+          }
+          base
+        },
+        character(1L)
+      )
+      all_exprs[[lname]] <- stats::setNames(relu_exprs, unit_names)
+      assign(lname, unit_names, envir = expr_reg)
     } else if (grepl("\\bactivation\\b", cls, perl = TRUE)) {
       # Standalone Activation layer: apply activation function to inbound expressions
       inbound <- topo_map[[lname]]
@@ -566,7 +919,8 @@ orbital_keras_dag_impl <- function(
       all_exprs[[lname]] <- stats::setNames(gmp_expr, gmp_nm)
       assign(lname, gmp_nm, envir = expr_reg)
     } else if (grepl("averagepooling1d", cls)) {
-      # AveragePooling1D: row-wise mean of all feature columns
+      # AveragePooling1D: row-wise mean of all feature columns.
+      # Global pooling (pool_size == T_in) is supported; windowed is not.
       if (grepl("2d|3d", cls)) {
         cli::cli_abort(
           "AveragePooling2D/3D is not supported by orbital (requires spatial aggregation)."
@@ -575,6 +929,23 @@ orbital_keras_dag_impl <- function(
       inbound <- topo_map[[lname]]
       in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
       n_f <- length(in_exprs)
+      pool_size <- tryCatch(
+        as.integer(l$get_config()$pool_size),
+        error = function(e) NA_integer_
+      )
+      if (!is.na(pool_size) && pool_size < n_f) {
+        cli::cli_abort(c(
+          "Windowed AveragePooling1D is not yet supported by orbital.",
+          "i" = paste0(
+            "pool_size = ",
+            pool_size,
+            ", input columns = ",
+            n_f,
+            ". ",
+            "Only global pooling (pool_size covering all time steps) is supported."
+          )
+        ))
+      }
       expr_bt <- backtick(in_exprs)
       ap_nm <- paste0("orbital_avgpool1d_", lname, "_1")
       ap_expr <- paste0(
@@ -586,7 +957,8 @@ orbital_keras_dag_impl <- function(
       all_exprs[[lname]] <- stats::setNames(ap_expr, ap_nm)
       assign(lname, ap_nm, envir = expr_reg)
     } else if (grepl("maxpooling1d", cls)) {
-      # MaxPooling1D: row-wise max of all feature columns
+      # MaxPooling1D: row-wise max of all feature columns.
+      # Global pooling (pool_size == T_in) is supported; windowed is not.
       if (grepl("2d|3d", cls)) {
         cli::cli_abort(
           "MaxPooling2D/3D is not supported by orbital (requires spatial aggregation)."
@@ -594,6 +966,23 @@ orbital_keras_dag_impl <- function(
       }
       inbound <- topo_map[[lname]]
       in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      pool_size <- tryCatch(
+        as.integer(l$get_config()$pool_size),
+        error = function(e) NA_integer_
+      )
+      if (!is.na(pool_size) && pool_size < length(in_exprs)) {
+        cli::cli_abort(c(
+          "Windowed MaxPooling1D is not yet supported by orbital.",
+          "i" = paste0(
+            "pool_size = ",
+            pool_size,
+            ", input columns = ",
+            length(in_exprs),
+            ". ",
+            "Only global pooling (pool_size covering all time steps) is supported."
+          )
+        ))
+      }
       expr_bt <- backtick(in_exprs)
       mp_nm <- paste0("orbital_maxpool1d_", lname, "_1")
       mp_expr <- paste0(
@@ -604,7 +993,12 @@ orbital_keras_dag_impl <- function(
       all_exprs[[lname]] <- stats::setNames(mp_expr, mp_nm)
       assign(lname, mp_nm, envir = expr_reg)
     } else if (grepl("globalsumpooling", cls)) {
-      # GlobalSumPooling1D: row-wise sum of all feature columns
+      # GlobalSumPooling1D: row-wise sum of all feature columns.
+      # NOTE: GlobalSumPooling1D is not a standard Keras 3 layer; it exists
+      # only in keras_cv (keras-cv package). This branch is effectively dead
+      # code for stock Keras 3 models. If you are using keras_cv, verify that
+      # the class name it produces contains "globalsumpooling"; otherwise this
+      # branch will never be reached.
       if (grepl("2d|3d", cls)) {
         cli::cli_abort(
           "GlobalSumPooling2D/3D is not supported by orbital (requires spatial aggregation)."
@@ -622,7 +1016,11 @@ orbital_keras_dag_impl <- function(
       all_exprs[[lname]] <- stats::setNames(gsp_expr, gsp_nm)
       assign(lname, gsp_nm, envir = expr_reg)
     } else if (grepl("instancenorm", cls)) {
-      # InstanceNormalization: per-row normalize across features (same as LayerNorm for 1D)
+      # InstanceNormalization: per-row normalize across features (same as LayerNorm for 1D).
+      # NOTE: InstanceNormalization is not a standard Keras 3 layer; it is
+      # provided by keras_cv. The class path may differ across keras_cv
+      # versions — verify the detected class string contains "instancenorm"
+      # before relying on this branch.
       inbound <- topo_map[[lname]]
       in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
       wts <- l$get_weights() # gamma, beta
@@ -937,8 +1335,11 @@ orbital_keras_dag_impl <- function(
       # Keras weight layout:
       #   kernel  : (kernel_size, in_channels, filters)
       #   bias    : (filters,)  [optional]
-      # orbital input: T_in * C_in flat columns, time-step major
-      #   in_exprs[(t-1)*C_in + c] = channel c at timestep t  (1-indexed).
+      # orbital input convention : C_in × T_in flat columns, channel-major.
+      #   in_exprs[(c-1)*T_in + t] = orbital feature for channel c, timestep t (1-indexed).
+      # orbital output convention: T_out × C_out flat columns, time-step major.
+      #   out_names[(p-1)*C_out + f] = filter f at output timestep p (1-indexed).
+      #   This matches Keras 3's (batch, T_out, C_out) row-major flattening.
       inbound <- topo_map[[lname]]
       in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
 
@@ -986,9 +1387,9 @@ orbital_keras_dag_impl <- function(
 
       conv_nms <- character(0L)
       conv_exprs <- character(0L)
-      for (f in seq_len(c_out)) {
-        for (p in seq_len(w_out)) {
-          p0 <- p - 1L
+      for (p in seq_len(w_out)) {
+        p0 <- p - 1L
+        for (f in seq_len(c_out)) {
           terms <- character(0L)
           for (c in seq_len(c_in)) {
             for (k in seq_len(k_w)) {
@@ -1010,7 +1411,7 @@ orbital_keras_dag_impl <- function(
           } else {
             paste0("(", paste(c(terms, b_str), collapse = " + "), ")")
           }
-          nm <- paste0("orbital_conv_", lname, "_f", f, "_p", p)
+          nm <- paste0("orbital_conv_", lname, "_p", p, "_f", f)
           conv_nms <- c(conv_nms, nm)
           conv_exprs <- c(conv_exprs, expr_str)
         }
@@ -1041,6 +1442,14 @@ orbital_keras_dag_impl <- function(
 
       # Get activation config (defaults: sigmoid for gates I/F/O, tanh for C)
       cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+      if (
+        isTRUE(tryCatch(as.logical(cfg_l$stateful), error = function(e) FALSE))
+      ) {
+        cli::cli_abort(c(
+          "LSTM layer {.val {lname}}: stateful = TRUE is not supported by orbital.",
+          "i" = "Only stateless LSTMs (stateful = FALSE, the Keras default) can be unrolled into SQL."
+        ))
+      }
       gate_act <- tryCatch(
         tolower(as.character(cfg_l$recurrent_activation %||% "sigmoid")),
         error = function(e) "sigmoid"
@@ -1189,6 +1598,14 @@ orbital_keras_dag_impl <- function(
 
       # Get activation config (defaults: sigmoid for Z/R, tanh for H-tilde)
       cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+      if (
+        isTRUE(tryCatch(as.logical(cfg_l$stateful), error = function(e) FALSE))
+      ) {
+        cli::cli_abort(c(
+          "GRU layer {.val {lname}}: stateful = TRUE is not supported by orbital.",
+          "i" = "Only stateless GRUs (stateful = FALSE, the Keras default) can be unrolled into SQL."
+        ))
+      }
       gate_act <- tryCatch(
         tolower(as.character(cfg_l$recurrent_activation %||% "sigmoid")),
         error = function(e) "sigmoid"
@@ -1199,6 +1616,14 @@ orbital_keras_dag_impl <- function(
       )
       return_seq <- isTRUE(
         tryCatch(as.logical(cfg_l$return_sequences), error = function(e) FALSE)
+      )
+      # When reset_after = TRUE (the Keras 3 default), the recurrent bias for
+      # the h-tilde gate is applied INSIDE the reset-gate multiplication:
+      #   h̃_t = g(x@Wh + b_hx + r_t[h] * (H_prev@Rh[h] + b_hh[h]))
+      # When reset_after = FALSE (legacy), the combined bias goes outside:
+      #   h̃_t = g((r ⊙ H_prev)@Rh + x@Wh + b_h)
+      reset_after <- isTRUE(
+        tryCatch(as.logical(cfg_l$reset_after), error = function(e) TRUE)
       )
 
       # ZRH gate offsets (0-indexed column starts): Z=0, R=H, H-tilde=2H
@@ -1262,17 +1687,44 @@ orbital_keras_dag_impl <- function(
           character(1L)
         )
 
-        # h̃ gate  (coupled: (r_t ⊙ H_prev) @ Rh)
+        # h̃ gate
+        # reset_after=TRUE  (Keras 3 default): h̃ = g(x@Wh + b_hx + r[h]*(H_prev@Rh + b_hh))
+        # reset_after=FALSE (legacy):          h̃ = g((r ⊙ H_prev)@Rh + x@Wh + b_h)
         R_h <- R_gates[[3L]] # (H, H): R_h[h, hid] = recurrent weight
-        h_inp <- build_mlp_pre_act(W_gates[[3L]], B_gates[[3L]], x_t_exprs)
+        h_idx <- (g_offs[3L] + 1L):(g_offs[3L] + H)
+        h_inp <- build_mlp_pre_act(
+          W_gates[[3L]],
+          if (reset_after) b_input[h_idx] else B_gates[[3L]],
+          x_t_exprs
+        )
 
         h_tilde_exprs <- vapply(
           seq_len(H),
           function(h) {
             if (is.null(H_prev_nms)) {
-              # H_prev = 0 → recurrent term is 0
+              # H_prev = 0 → recurrent term vanishes entirely
               activation_expr(cell_act, h_inp[h])
+            } else if (reset_after) {
+              # Correct reset_after=TRUE formula:
+              # r[h] * (\sum_j H_prev[j]*R_h[h,j] + b_hh[h])
+              rec_sum <- paste(
+                paste0(backtick(H_prev_nms), " * ", format_numeric(R_h[h, ])),
+                collapse = " + "
+              )
+              rec_with_bias <- paste0(
+                "(",
+                rec_sum,
+                " + ",
+                format_numeric(b_recur[h_idx[h]]),
+                ")"
+              )
+              coupled <- paste0(backtick(r_nms[h]), " * ", rec_with_bias)
+              activation_expr(
+                cell_act,
+                paste0("(", h_inp[h], " + ", coupled, ")")
+              )
             } else {
+              # Legacy reset_after=FALSE formula: (r ⊙ H_prev) @ Rh
               coupled <- paste(
                 paste0(
                   backtick(r_nms),
@@ -1339,6 +1791,280 @@ orbital_keras_dag_impl <- function(
         H_prev_nms
       }
       assign(lname, out_nms, envir = expr_reg)
+    } else if (grepl("bidirectional", cls)) {
+      # Bidirectional wrapper: runs forward and backward passes of an inner
+      # LSTM or GRU and concatenates their outputs.
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+
+      fwd_layer <- tryCatch(l$forward_layer, error = function(e) NULL)
+      bwd_layer <- tryCatch(l$backward_layer, error = function(e) NULL)
+      if (is.null(fwd_layer) || is.null(bwd_layer)) {
+        cli::cli_abort(
+          c(
+            "Bidirectional layer {.val {lname}} does not expose forward_layer / backward_layer.",
+            "i" = "Ensure you are using Keras 3 (>= 3.0)."
+          )
+        )
+      }
+      fwd_cls_inner <- tolower(class(fwd_layer)[1L])
+      if (!grepl("\\blstm\\b|\\bgru\\b", fwd_cls_inner, perl = TRUE)) {
+        cli::cli_abort(
+          "Bidirectional layer {.val {lname}}: inner layer {.cls {fwd_cls_inner}} is not LSTM or GRU."
+        )
+      }
+
+      cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+      merge_mode <- tryCatch(
+        tolower(as.character(cfg_l$merge_mode)),
+        error = function(e) "concat"
+      )
+      if (is.na(merge_mode) || merge_mode == "null" || !nzchar(merge_mode)) {
+        merge_mode <- "concat"
+      }
+      if (!merge_mode %in% c("concat", "sum", "mul", "ave")) {
+        cli::cli_abort(
+          "Bidirectional layer {.val {lname}}: merge_mode = {.val {merge_mode}} is not supported."
+        )
+      }
+
+      # Infer I_feat and T_len from forward layer kernel shape
+      fwd_wts <- fwd_layer$get_weights()
+      I_feat_bd <- nrow(fwd_wts[[1L]])
+      T_len_bd <- as.integer(length(in_exprs) / I_feat_bd)
+
+      fwd_pfx <- paste0("orbital_bidir_fwd_", lname)
+      fwd <- .unroll_rnn(fwd_layer, in_exprs, fwd_pfx)
+
+      rev_exprs <- unlist(
+        lapply(rev(seq_len(T_len_bd)), function(t) {
+          in_exprs[((t - 1L) * I_feat_bd + 1L):(t * I_feat_bd)]
+        }),
+        use.names = FALSE
+      )
+      bwd_pfx <- paste0("orbital_bidir_bwd_", lname)
+      bwd <- .unroll_rnn(bwd_layer, rev_exprs, bwd_pfx)
+
+      all_exprs[[lname]] <- stats::setNames(
+        c(fwd$exprs, bwd$exprs),
+        c(fwd$nms, bwd$nms)
+      )
+
+      # Determine the inner layer's return_sequences flag
+      inner_return_seq <- isTRUE(
+        tryCatch(
+          as.logical(fwd_layer$get_config()$return_sequences),
+          error = function(e) FALSE
+        )
+      )
+
+      if (merge_mode == "concat") {
+        out_nms_bd <- if (inner_return_seq) {
+          # Per timestep t: [fwd[t] || bwd[T-t+1]]
+          # (bwd processed reversed input; bwd step k = original step T-k+1)
+          unlist(
+            lapply(seq_len(fwd$T), function(t) {
+              c(fwd$all_H_nms[[t]], bwd$all_H_nms[[fwd$T - t + 1L]])
+            }),
+            use.names = FALSE
+          )
+        } else {
+          c(fwd$out_nms, bwd$out_nms)
+        }
+      } else {
+        # sum / mul / ave: emit merged intermediate expressions
+        fwd_final <- if (inner_return_seq) {
+          unlist(fwd$all_H_nms, use.names = FALSE)
+        } else {
+          fwd$out_nms
+        }
+        bwd_final <- if (inner_return_seq) {
+          unlist(
+            lapply(seq_len(fwd$T), function(t) {
+              bwd$all_H_nms[[fwd$T - t + 1L]]
+            }),
+            use.names = FALSE
+          )
+        } else {
+          bwd$out_nms
+        }
+        merge_nms <- paste0(
+          "orbital_bidir_merge_",
+          lname,
+          "_",
+          seq_along(fwd_final)
+        )
+        merge_exprs_bd <- vapply(
+          seq_along(fwd_final),
+          function(i) {
+            switch(
+              merge_mode,
+              sum = paste0(
+                "(",
+                backtick(fwd_final[i]),
+                " + ",
+                backtick(bwd_final[i]),
+                ")"
+              ),
+              mul = paste0(
+                "(",
+                backtick(fwd_final[i]),
+                " * ",
+                backtick(bwd_final[i]),
+                ")"
+              ),
+              ave = paste0(
+                "((",
+                backtick(fwd_final[i]),
+                " + ",
+                backtick(bwd_final[i]),
+                ") / 2)"
+              )
+            )
+          },
+          character(1L)
+        )
+        all_exprs[[lname]] <- c(
+          all_exprs[[lname]],
+          stats::setNames(merge_exprs_bd, merge_nms)
+        )
+        out_nms_bd <- merge_nms
+      }
+      assign(lname, out_nms_bd, envir = expr_reg)
+    } else if (grepl("simplernn", cls)) {
+      # SimpleRNN: h_t = activation(x_t @ W + h_{t-1} @ U + b)
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      wts <- l$get_weights() # kernel (I, H), recurrent_kernel (H, H) [, bias (H,)]
+      kernel <- wts[[1L]] # (I, H)
+      rkernel <- wts[[2L]] # (H, H)
+      H <- ncol(kernel)
+      I_feat <- nrow(kernel)
+      T_len <- as.integer(length(in_exprs) / I_feat)
+      bias_v <- if (length(wts) >= 3L) as.numeric(wts[[3L]]) else numeric(H)
+      cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+      activation <- tryCatch(
+        tolower(as.character(cfg_l$activation %||% "tanh")),
+        error = function(e) "tanh"
+      )
+      return_seq <- isTRUE(
+        tryCatch(as.logical(cfg_l$return_sequences), error = function(e) FALSE)
+      )
+      W_t <- t(kernel) # (H, I)
+      U_t <- t(rkernel) # (H, H)
+
+      all_srnn_nms <- character(0L)
+      all_srnn_exprs <- character(0L)
+      all_H_nms <- list()
+      H_prev_nms <- NULL
+
+      for (t in seq_len(T_len)) {
+        x_t_exprs <- in_exprs[((t - 1L) * I_feat + 1L):(t * I_feat)]
+        pre_act <- build_mlp_pre_act(W_t, bias_v, x_t_exprs)
+        if (!is.null(H_prev_nms)) {
+          rec <- build_mlp_pre_act(U_t, numeric(H), H_prev_nms)
+          pre_act <- paste0("(", pre_act, " + ", rec, ")")
+        }
+        H_nms <- paste0("orbital_srnn_", lname, "_H_t", t, "_h", seq_len(H))
+        H_exprs_t <- vapply(
+          pre_act,
+          function(e) activation_expr(activation, e),
+          character(1L)
+        )
+        all_srnn_nms <- c(all_srnn_nms, H_nms)
+        all_srnn_exprs <- c(all_srnn_exprs, H_exprs_t)
+        all_H_nms[[t]] <- H_nms
+        H_prev_nms <- H_nms
+      }
+      all_exprs[[lname]] <- stats::setNames(all_srnn_exprs, all_srnn_nms)
+      out_nms <- if (return_seq) {
+        unlist(all_H_nms, use.names = FALSE)
+      } else {
+        H_prev_nms
+      }
+      assign(lname, out_nms, envir = expr_reg)
+    } else if (grepl("unitnorm", cls)) {
+      # UnitNormalization: L2-normalise each row across all features.
+      # y_i = x_i / sqrt(x_1^2 + ... + x_n^2 + eps)
+      # Only axis = -1 (normalise over feature dimension) is supported.
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      n_feat <- length(in_exprs)
+      expr_bt <- backtick(in_exprs)
+      norm_nm <- paste0("orbital_unitnorm_", lname, "_norm")
+      sq_sum <- paste(paste0(expr_bt, "^2"), collapse = " + ")
+      norm_expr <- paste0("sqrt(", sq_sum, " + 1e-12)")
+      unit_names <- paste0("orbital_unitnorm_", lname, "_h", seq_len(n_feat))
+      unit_exprs <- vapply(
+        seq_len(n_feat),
+        function(i) paste0("(", expr_bt[i], " / `", norm_nm, "`)"),
+        character(1L)
+      )
+      all_exprs[[lname]] <- c(
+        stats::setNames(norm_expr, norm_nm),
+        stats::setNames(unit_exprs, unit_names)
+      )
+      assign(lname, unit_names, envir = expr_reg)
+    } else if (grepl("zeropadding1d", cls)) {
+      # ZeroPadding1D: emit literal 0 columns for padded timesteps;
+      # pass through interior columns unchanged.
+      # Input layout: [T_in × C] flat vector (time-step major).
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+
+      padding_raw <- tryCatch(l$get_config()$padding, error = function(e) 1L)
+      if (is.list(padding_raw)) {
+        padding_raw <- as.integer(unlist(padding_raw))
+      } else {
+        padding_raw <- as.integer(padding_raw)
+      }
+      pad_left <- if (length(padding_raw) >= 1L) padding_raw[[1L]] else 1L
+      pad_right <- if (length(padding_raw) >= 2L) {
+        padding_raw[[2L]]
+      } else {
+        padding_raw[[1L]]
+      }
+
+      # Determine C (channels per timestep) from input shape; fallback to 1.
+      in_shape <- tryCatch(
+        as.integer(unlist(l$input_shape)),
+        error = function(e) NULL
+      )
+      C_feat <- if (!is.null(in_shape) && length(in_shape) >= 1L) {
+        tail(in_shape[!is.na(in_shape)], 1L)
+      } else {
+        1L
+      }
+      T_in <- as.integer(length(in_exprs) / C_feat)
+      T_out <- T_in + pad_left + pad_right
+
+      zero_col <- "0"
+      pad_block <- rep(zero_col, C_feat)
+
+      out_exprs <- character(0L)
+      out_nms <- character(0L)
+      for (tp in seq_len(T_out)) {
+        step_nms <- paste0(
+          "orbital_zpad_",
+          lname,
+          "_t",
+          tp,
+          "_c",
+          seq_len(C_feat)
+        )
+        if (tp <= pad_left || tp > pad_left + T_in) {
+          step_exprs <- pad_block
+        } else {
+          orig_t <- tp - pad_left
+          step_exprs <- in_exprs[
+            ((orig_t - 1L) * C_feat + 1L):(orig_t * C_feat)
+          ]
+        }
+        out_exprs <- c(out_exprs, step_exprs)
+        out_nms <- c(out_nms, step_nms)
+      }
+      all_exprs[[lname]] <- stats::setNames(out_exprs, out_nms)
+      assign(lname, out_nms, envir = expr_reg)
     } else {
       cli::cli_abort(c(
         "Unsupported layer type in Keras Functional model: {.cls {cls_orig}}.",
@@ -1347,7 +2073,8 @@ orbital_keras_dag_impl <- function(
           "LayerNormalization, InstanceNormalization, GroupNormalization,",
           "RMSNormalization, PReLU, GlobalAveragePooling1D, GlobalMaxPooling1D,",
           "AveragePooling1D, MaxPooling1D, GlobalSumPooling1D,",
-          "Conv1D, LSTM, GRU,",
+          "Conv1D, LSTM, GRU, Bidirectional(LSTM/GRU), SimpleRNN,",
+          "UnitNormalization, ZeroPadding1D,",
           "Dropout, Flatten, Reshape, Activation, Softmax."
         ),
         "i" = "Please file an issue: {.url https://github.com/davidrsch/orbital/issues/14}"
@@ -1424,7 +2151,8 @@ orbital_keras_impl <- function(
           "\\badd\\b|concatenate|batchnorm|layernorm|instancenorm|groupnorm|",
           "rmsnormalization|prelu|leakyrelu|\\belu\\b|globalaveragepool|",
           "globalmaxpool|averagepooling1d|maxpooling1d|globalsumpooling|",
-          "\\bactivation\\b|\\bsoftmax\\b|\\blstm\\b|\\bgru\\b|conv1d"
+          "\\bactivation\\b|\\bsoftmax\\b|\\blstm\\b|\\bgru\\b|conv1d|",
+          "bidirectional|simplernn|unitnorm|zeropadding1d"
         ),
         cls,
         perl = TRUE

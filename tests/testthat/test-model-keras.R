@@ -1915,9 +1915,10 @@ test_that("keras3 Functional model with Activation('celu') predictions match ker
     mode = "regression",
     feature_names = feature_names
   )
-  # CELU expression contains pmax/pmin and exp
+  # CELU expression uses dplyr::if_else and exp (not pmax/pmin)
   hidden_exprs <- orb_obj[grepl("orbital_act_", names(orb_obj))]
-  expect_true(any(grepl("pmax|pmin", hidden_exprs)))
+  expect_true(any(grepl("if_else", hidden_exprs)))
+  expect_true(any(grepl("exp", hidden_exprs)))
   preds_orb <- predict(orb_obj, df)$.pred
   preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
   expect_equal(preds_orb, preds_keras, tolerance = 1e-4)
@@ -2127,4 +2128,224 @@ test_that("keras3 model with Reshape layer predictions match keras3 predict", {
   preds_orb <- predict(orb_obj, df)$.pred
   preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
   expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+# ── B4: LSTM, GRU, Conv1D, RMSNormalization coverage tests ───────────────────
+
+test_that("keras3 LSTM (return_sequences=FALSE) predictions match keras3 predict", {
+  skip_if_not_installed("keras3")
+  skip_if_not_installed("reticulate")
+  skip_if_not(
+    reticulate::py_available(initialize = FALSE),
+    "Python not available"
+  )
+  k <- reticulate::import("keras")
+  T_len <- 3L
+  C_in <- 2L
+  H <- 4L
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$LSTM(H, return_sequences = FALSE)(inp)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  y_vec <- rnorm(n_row)
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, y_vec, epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  preds_orb <- predict(orb_obj, df)$.pred
+  preds_keras <- as.numeric(model$predict(x_3d, verbose = 0L))
+  expect_equal(preds_orb, preds_keras, tolerance = 1e-4)
+})
+
+test_that("keras3 LSTM (return_sequences=TRUE) predictions match keras3 predict", {
+  skip_if_not_installed("keras3")
+  skip_if_not_installed("reticulate")
+  skip_if_not(
+    reticulate::py_available(initialize = FALSE),
+    "Python not available"
+  )
+  k <- reticulate::import("keras")
+  T_len <- 3L
+  C_in <- 2L
+  H <- 3L
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$LSTM(H, return_sequences = TRUE)(inp)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  y_vec <- rnorm(n_row)
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, y_vec, epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  preds_orb <- predict(orb_obj, df)$.pred
+  preds_keras <- as.numeric(model$predict(x_3d, verbose = 0L))
+  expect_equal(preds_orb, preds_keras, tolerance = 1e-4)
+})
+
+test_that("keras3 GRU (return_sequences=FALSE) predictions match keras3 predict", {
+  skip_if_not_installed("keras3")
+  skip_if_not_installed("reticulate")
+  skip_if_not(
+    reticulate::py_available(initialize = FALSE),
+    "Python not available"
+  )
+  k <- reticulate::import("keras")
+  T_len <- 3L
+  C_in <- 2L
+  H <- 4L
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$GRU(H, return_sequences = FALSE)(inp)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  y_vec <- rnorm(n_row)
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, y_vec, epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  preds_orb <- predict(orb_obj, df)$.pred
+  preds_keras <- as.numeric(model$predict(x_3d, verbose = 0L))
+  expect_equal(preds_orb, preds_keras, tolerance = 1e-4)
+})
+
+test_that("keras3 GRU (return_sequences=TRUE) predictions match keras3 predict", {
+  skip_if_not_installed("keras3")
+  skip_if_not_installed("reticulate")
+  skip_if_not(
+    reticulate::py_available(initialize = FALSE),
+    "Python not available"
+  )
+  k <- reticulate::import("keras")
+  T_len <- 3L
+  C_in <- 2L
+  H <- 3L
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$GRU(H, return_sequences = TRUE)(inp)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  y_vec <- rnorm(n_row)
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, y_vec, epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  preds_orb <- predict(orb_obj, df)$.pred
+  preds_keras <- as.numeric(model$predict(x_3d, verbose = 0L))
+  expect_equal(preds_orb, preds_keras, tolerance = 1e-4)
+})
+
+test_that("keras3 Conv1D predictions match keras3 predict", {
+  skip_if_not_installed("keras3")
+  skip_if_not_installed("reticulate")
+  skip_if_not(
+    reticulate::py_available(initialize = FALSE),
+    "Python not available"
+  )
+  k <- reticulate::import("keras")
+  T_len <- 4L
+  C_in <- 2L
+  filters <- 3L
+  ksize <- 2L
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$Conv1D(filters, ksize, activation = "relu")(inp)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  y_vec <- rnorm(n_row)
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, y_vec, epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  preds_orb <- predict(orb_obj, df)$.pred
+  preds_keras <- as.numeric(model$predict(x_3d, verbose = 0L))
+  expect_equal(preds_orb, preds_keras, tolerance = 1e-4)
+})
+
+test_that("keras3 RMSNormalization predictions match keras3 predict", {
+  skip_if_not_installed("keras3")
+  skip_if_not_installed("reticulate")
+  skip_if_not(
+    reticulate::py_available(initialize = FALSE),
+    "Python not available"
+  )
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(4L))
+  x <- k$layers$Dense(6L, activation = "relu")(inp)
+  x <- k$layers$RMSNormalization()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+  y_vec <- rnorm(10)
+  model$fit(x_mat, y_vec, epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", 1:4)
+  df <- as.data.frame(x_mat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  preds_orb <- predict(orb_obj, df)$.pred
+  preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+  expect_equal(preds_orb, preds_keras, tolerance = 1e-4)
 })
