@@ -919,8 +919,9 @@ orbital_keras_dag_impl <- function(
       all_exprs[[lname]] <- stats::setNames(gmp_expr, gmp_nm)
       assign(lname, gmp_nm, envir = expr_reg)
     } else if (grepl("averagepooling1d", cls)) {
-      # AveragePooling1D: row-wise mean of all feature columns.
-      # Global pooling (pool_size == T_in) is supported; windowed is not.
+      # AveragePooling1D: sliding-window mean across time steps.
+      # Input layout: time-step major (T_in × C_feat) — in_exprs[(t-1)*C_feat + c]
+      # for 1-indexed timestep t and 1-indexed channel c.
       if (grepl("2d|3d", cls)) {
         cli::cli_abort(
           "AveragePooling2D/3D is not supported by orbital (requires spatial aggregation)."
@@ -933,32 +934,68 @@ orbital_keras_dag_impl <- function(
         as.integer(l$get_config()$pool_size),
         error = function(e) NA_integer_
       )
-      if (!is.na(pool_size) && pool_size < n_f) {
-        cli::cli_abort(c(
-          "Windowed AveragePooling1D is not yet supported by orbital.",
-          "i" = paste0(
-            "pool_size = ",
-            pool_size,
-            ", input columns = ",
-            n_f,
-            ". ",
-            "Only global pooling (pool_size covering all time steps) is supported."
-          )
-        ))
+      if (is.na(pool_size)) {
+        pool_size <- n_f
       }
-      expr_bt <- backtick(in_exprs)
-      ap_nm <- paste0("orbital_avgpool1d_", lname, "_1")
-      ap_expr <- paste0(
-        "(",
-        paste(expr_bt, collapse = " + "),
-        ") / ",
-        n_f
+      stride <- tryCatch(
+        {
+          s <- as.integer(unlist(l$get_config()$strides))[[1L]]
+          if (!is.na(s)) s else pool_size
+        },
+        error = function(e) pool_size
       )
-      all_exprs[[lname]] <- stats::setNames(ap_expr, ap_nm)
-      assign(lname, ap_nm, envir = expr_reg)
+      padding <- tryCatch(
+        tolower(as.character(l$get_config()$padding)),
+        error = function(e) "valid"
+      )
+      in_shape <- tryCatch(
+        as.integer(unlist(l$input_shape)),
+        error = function(e) NULL
+      )
+      C_feat <- if (!is.null(in_shape) && length(in_shape) >= 1L) {
+        tail(in_shape[!is.na(in_shape)], 1L)
+      } else {
+        1L
+      }
+      T_in <- as.integer(n_f / C_feat)
+      if (padding == "valid") {
+        T_out <- (T_in - pool_size) %/% stride + 1L
+        pad_l <- 0L
+      } else {
+        T_out <- as.integer(ceiling(T_in / stride))
+        total_pad <- max(0L, (T_out - 1L) * stride + pool_size - T_in)
+        pad_l <- total_pad %/% 2L
+      }
+      pool_nms <- character(0)
+      pool_exprs <- character(0)
+      idx <- 1L
+      for (p in seq_len(T_out) - 1L) {
+        for (c in seq_len(C_feat)) {
+          window_bt <- character(0)
+          for (kk in seq_len(pool_size) - 1L) {
+            t_pos <- p * stride + kk - pad_l
+            if (t_pos >= 0L && t_pos < T_in) {
+              flat_idx <- t_pos * C_feat + c
+              window_bt <- c(window_bt, backtick(in_exprs[[flat_idx]]))
+            }
+          }
+          n_valid <- length(window_bt)
+          nm <- paste0("orbital_avgpool1d_", lname, "_", idx)
+          pool_exprs[[idx]] <- if (n_valid > 0L) {
+            paste0("(", paste(window_bt, collapse = " + "), ") / ", n_valid)
+          } else {
+            "0"
+          }
+          pool_nms[[idx]] <- nm
+          idx <- idx + 1L
+        }
+      }
+      all_exprs[[lname]] <- stats::setNames(pool_exprs, pool_nms)
+      assign(lname, pool_nms, envir = expr_reg)
     } else if (grepl("maxpooling1d", cls)) {
-      # MaxPooling1D: row-wise max of all feature columns.
-      # Global pooling (pool_size == T_in) is supported; windowed is not.
+      # MaxPooling1D: sliding-window max across time steps.
+      # Input layout: time-step major (T_in × C_feat) — in_exprs[(t-1)*C_feat + c]
+      # for 1-indexed timestep t and 1-indexed channel c.
       if (grepl("2d|3d", cls)) {
         cli::cli_abort(
           "MaxPooling2D/3D is not supported by orbital (requires spatial aggregation)."
@@ -966,32 +1003,72 @@ orbital_keras_dag_impl <- function(
       }
       inbound <- topo_map[[lname]]
       in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      n_f <- length(in_exprs)
       pool_size <- tryCatch(
         as.integer(l$get_config()$pool_size),
         error = function(e) NA_integer_
       )
-      if (!is.na(pool_size) && pool_size < length(in_exprs)) {
-        cli::cli_abort(c(
-          "Windowed MaxPooling1D is not yet supported by orbital.",
-          "i" = paste0(
-            "pool_size = ",
-            pool_size,
-            ", input columns = ",
-            length(in_exprs),
-            ". ",
-            "Only global pooling (pool_size covering all time steps) is supported."
-          )
-        ))
+      if (is.na(pool_size)) {
+        pool_size <- n_f
       }
-      expr_bt <- backtick(in_exprs)
-      mp_nm <- paste0("orbital_maxpool1d_", lname, "_1")
-      mp_expr <- paste0(
-        "do.call(pmax, list(",
-        paste(expr_bt, collapse = ", "),
-        "))"
+      stride <- tryCatch(
+        {
+          s <- as.integer(unlist(l$get_config()$strides))[[1L]]
+          if (!is.na(s)) s else pool_size
+        },
+        error = function(e) pool_size
       )
-      all_exprs[[lname]] <- stats::setNames(mp_expr, mp_nm)
-      assign(lname, mp_nm, envir = expr_reg)
+      padding <- tryCatch(
+        tolower(as.character(l$get_config()$padding)),
+        error = function(e) "valid"
+      )
+      in_shape <- tryCatch(
+        as.integer(unlist(l$input_shape)),
+        error = function(e) NULL
+      )
+      C_feat <- if (!is.null(in_shape) && length(in_shape) >= 1L) {
+        tail(in_shape[!is.na(in_shape)], 1L)
+      } else {
+        1L
+      }
+      T_in <- as.integer(n_f / C_feat)
+      if (padding == "valid") {
+        T_out <- (T_in - pool_size) %/% stride + 1L
+        pad_l <- 0L
+      } else {
+        T_out <- as.integer(ceiling(T_in / stride))
+        total_pad <- max(0L, (T_out - 1L) * stride + pool_size - T_in)
+        pad_l <- total_pad %/% 2L
+      }
+      pool_nms <- character(0)
+      pool_exprs <- character(0)
+      idx <- 1L
+      for (p in seq_len(T_out) - 1L) {
+        for (c in seq_len(C_feat)) {
+          window_bt <- character(0)
+          for (kk in seq_len(pool_size) - 1L) {
+            t_pos <- p * stride + kk - pad_l
+            if (t_pos >= 0L && t_pos < T_in) {
+              flat_idx <- t_pos * C_feat + c
+              window_bt <- c(window_bt, backtick(in_exprs[[flat_idx]]))
+            }
+          }
+          nm <- paste0("orbital_maxpool1d_", lname, "_", idx)
+          pool_exprs[[idx]] <- if (length(window_bt) > 0L) {
+            paste0(
+              "do.call(pmax, list(",
+              paste(window_bt, collapse = ", "),
+              "))"
+            )
+          } else {
+            "-Inf"
+          }
+          pool_nms[[idx]] <- nm
+          idx <- idx + 1L
+        }
+      }
+      all_exprs[[lname]] <- stats::setNames(pool_exprs, pool_nms)
+      assign(lname, pool_nms, envir = expr_reg)
     } else if (grepl("globalsumpooling", cls)) {
       # GlobalSumPooling1D: row-wise sum of all feature columns.
       # NOTE: GlobalSumPooling1D is not a standard Keras 3 layer; it exists
@@ -1335,8 +1412,9 @@ orbital_keras_dag_impl <- function(
       # Keras weight layout:
       #   kernel  : (kernel_size, in_channels, filters)
       #   bias    : (filters,)  [optional]
-      # orbital input convention : C_in × T_in flat columns, channel-major.
-      #   in_exprs[(c-1)*T_in + t] = orbital feature for channel c, timestep t (1-indexed).
+      # orbital input convention : T_in × C_in flat columns, time-step major.
+      #   in_exprs[(t-1)*C_in + c] = orbital feature for timestep t, channel c (1-indexed).
+      #   This matches Keras 3's (batch, T_in, C_in) row-major flattening.
       # orbital output convention: T_out × C_out flat columns, time-step major.
       #   out_names[(p-1)*C_out + f] = filter f at output timestep p (1-indexed).
       #   This matches Keras 3's (batch, T_out, C_out) row-major flattening.
@@ -1396,7 +1474,7 @@ orbital_keras_dag_impl <- function(
               k0 <- k - 1L
               w_pos <- p0 * stride + k0 * dilation - pad_l
               if (w_pos >= 0L && w_pos < w_in) {
-                feat_nm <- in_exprs[(c - 1L) * w_in + w_pos + 1L]
+                feat_nm <- in_exprs[w_pos * c_in + c]
                 wt_val <- format_numeric(kern[k, c, f])
                 terms <- c(
                   terms,
@@ -2065,6 +2143,392 @@ orbital_keras_dag_impl <- function(
       }
       all_exprs[[lname]] <- stats::setNames(out_exprs, out_nms)
       assign(lname, out_nms, envir = expr_reg)
+    } else if (grepl("multiheadattention", cls)) {
+      # MultiHeadAttention: scaled dot-product self-attention or cross-attention.
+      # Supports: fixed-length sequences; causal_mask = FALSE; use_bias = TRUE/FALSE.
+      # Input layout: time-step major (T × C_in) flat vector.
+      # Weight extraction via reticulate::py_get_attr on internal EinsumDense sub-layers.
+      inbound <- topo_map[[lname]]
+      q_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      kv_exprs <- get(
+        inbound[min(2L, length(inbound))],
+        envir = expr_reg,
+        inherits = FALSE
+      )
+
+      cfg <- tryCatch(l$get_config(), error = function(e) list())
+      num_heads <- as.integer(cfg$num_heads %||% 1L)
+      key_dim <- as.integer(cfg$key_dim %||% 1L)
+      value_dim <- as.integer(cfg$value_dim %||% key_dim)
+      use_bias <- isTRUE(as.logical(cfg$use_bias %||% TRUE))
+
+      in_shape <- tryCatch(
+        as.integer(unlist(l$input_shape[[1L]])),
+        error = function(e) NULL
+      )
+      C_in <- if (!is.null(in_shape)) {
+        tail(in_shape[!is.na(in_shape)], 1L)
+      } else {
+        1L
+      }
+      T_q <- as.integer(length(q_exprs) / C_in)
+      T_kv <- as.integer(length(kv_exprs) / C_in)
+
+      out_shape <- tryCatch(
+        as.integer(unlist(l$output_shape)),
+        error = function(e) NULL
+      )
+      C_out <- if (!is.null(out_shape)) {
+        tail(out_shape[!is.na(out_shape)], 1L)
+      } else {
+        C_in
+      }
+
+      # Retrieve kernel and bias from an EinsumDense sub-layer (handles _attr naming).
+      .mha_wts <- function(attr_name) {
+        sub <- tryCatch(
+          reticulate::py_get_attr(l, attr_name),
+          error = function(e) NULL
+        )
+        if (is.null(sub)) {
+          return(NULL)
+        }
+        k <- tryCatch(
+          as.array(reticulate::py_to_r(sub$kernel)),
+          error = function(e) NULL
+        )
+        b <- if (use_bias) {
+          tryCatch(
+            as.array(reticulate::py_to_r(sub$bias)),
+            error = function(e) NULL
+          )
+        } else {
+          NULL
+        }
+        if (is.null(k)) {
+          return(NULL)
+        }
+        list(kernel = k, bias = b)
+      }
+
+      wq <- .mha_wts("_query_dense")
+      wk <- .mha_wts("_key_dense")
+      wv <- .mha_wts("_value_dense")
+      wo <- .mha_wts("_output_dense")
+
+      if (is.null(wq) || is.null(wk) || is.null(wv) || is.null(wo)) {
+        cli::cli_abort(
+          "MultiHeadAttention {.val {lname}}: could not extract sub-layer projection weights.",
+          "i" = "Ensure keras3 >= 3.0 with reticulate access to _query_dense, _key_dense, etc."
+        )
+      }
+
+      # Determine weight accessor functions given that Keras3 EinsumDense stores
+      # Q/K kernels as 3-D arrays.  Two known layouts:
+      #   (a) (C_in, key_dim, num_heads)  — einsum "abc,ced->abde" with d=num_heads,e=key_dim
+      #   (b) (C_in, num_heads, key_dim)  — alternative layout
+      .make_proj_at <- function(k, dim2_size, dim3_size, name) {
+        d <- dim(k)
+        if (length(d) != 3L) {
+          cli::cli_abort(
+            "MHA {.val {lname}}: {name} kernel must be 3-D, got {length(d)}D."
+          )
+        }
+        if (d[1L] != C_in) {
+          cli::cli_abort(
+            "MHA {.val {lname}}: {name} kernel dim1={d[1L]} does not match C_in={C_in}."
+          )
+        }
+        if (d[2L] == dim2_size && d[3L] == dim3_size) {
+          function(c_idx, idx2, idx3) k[c_idx, idx2, idx3]
+        } else if (d[2L] == dim3_size && d[3L] == dim2_size) {
+          function(c_idx, idx2, idx3) k[c_idx, idx3, idx2]
+        } else {
+          cli::cli_abort(
+            "MHA {.val {lname}}: {name} kernel dims ({d}) cannot be reconciled with ",
+            "expected ({C_in}, {dim2_size}, {dim3_size}) or transposed."
+          )
+        }
+      }
+
+      # Q/K: (C_in, ?, ?) with dims key_dim and num_heads in some order.
+      # After .make_proj_at, call as wq_at(c, key_dim_idx, head_idx) → scalar.
+      wq_at <- .make_proj_at(wq$kernel, key_dim, num_heads, "Q")
+      wk_at <- .make_proj_at(wk$kernel, key_dim, num_heads, "K")
+      # V: (C_in, ?, ?) with dims value_dim and num_heads.
+      wv_at <- .make_proj_at(wv$kernel, value_dim, num_heads, "V")
+
+      # Q bias accessor: shape (key_dim, num_heads) or (num_heads, key_dim).
+      .make_bias_at2 <- function(b, d2, d3, name) {
+        if (is.null(b)) {
+          return(function(i2, i3) "0")
+        }
+        di <- dim(b)
+        if (length(di) == 2L && di[1L] == d2 && di[2L] == d3) {
+          function(i2, i3) format_numeric(b[i2, i3])
+        } else if (length(di) == 2L && di[1L] == d3 && di[2L] == d2) {
+          function(i2, i3) format_numeric(b[i3, i2])
+        } else {
+          function(i2, i3) "0"
+        }
+      }
+      bq_at <- .make_bias_at2(wq$bias, key_dim, num_heads, "Q_bias")
+      bk_at <- .make_bias_at2(wk$bias, key_dim, num_heads, "K_bias")
+      bv_at <- .make_bias_at2(wv$bias, value_dim, num_heads, "V_bias")
+
+      # Output projection: (num_heads, value_dim, C_out) or transposed.
+      wo_d <- dim(wo$kernel)
+      if (
+        length(wo_d) == 3L && wo_d[1L] == num_heads && wo_d[2L] == value_dim
+      ) {
+        wo_at <- function(h, dv, do_) wo$kernel[h, dv, do_]
+        C_out_w <- wo_d[3L]
+      } else if (
+        length(wo_d) == 3L && wo_d[1L] == C_out && wo_d[2L] == num_heads
+      ) {
+        # (C_out, num_heads, value_dim) layout
+        wo_at <- function(h, dv, do_) wo$kernel[do_, h, dv]
+        C_out_w <- wo_d[1L]
+      } else {
+        cli::cli_abort(
+          "MHA {.val {lname}}: output kernel dims {wo_d} unrecognised."
+        )
+      }
+      bo_at <- function(do_) {
+        if (!is.null(wo$bias) && length(wo$bias) >= do_) {
+          format_numeric(wo$bias[do_])
+        } else {
+          "0"
+        }
+      }
+
+      # Helper: column name for an input at (timestep t, channel c)
+      q_at <- function(t, c) backtick(q_exprs[(t - 1L) * C_in + c])
+      kv_at <- function(t, c) backtick(kv_exprs[(t - 1L) * C_in + c])
+
+      mha_nms <- character(0)
+      mha_exprs <- character(0)
+
+      # Q[q, h, d_k] = sum_c input_q[q, c] * W_q(c, d_k, h) + b_q(d_k, h)
+      q_nm <- array(NA_character_, dim = c(T_q, num_heads, key_dim))
+      for (q in seq_len(T_q)) {
+        for (h in seq_len(num_heads)) {
+          for (d in seq_len(key_dim)) {
+            terms <- vapply(
+              seq_len(C_in),
+              function(c) {
+                paste0(q_at(q, c), " * ", format_numeric(wq_at(c, d, h)))
+              },
+              character(1L)
+            )
+            nm <- paste0("orbital_mha_", lname, "_Q_q", q, "_h", h, "_d", d)
+            mha_nms <- c(mha_nms, nm)
+            mha_exprs <- c(
+              mha_exprs,
+              paste0(
+                "(",
+                paste(terms, collapse = " + "),
+                " + ",
+                bq_at(d, h),
+                ")"
+              )
+            )
+            q_nm[q, h, d] <- nm
+          }
+        }
+      }
+
+      # K[k, h, d_k] = sum_c input_kv[k, c] * W_k(c, d_k, h) + b_k(d_k, h)
+      k_nm <- array(NA_character_, dim = c(T_kv, num_heads, key_dim))
+      for (k in seq_len(T_kv)) {
+        for (h in seq_len(num_heads)) {
+          for (d in seq_len(key_dim)) {
+            terms <- vapply(
+              seq_len(C_in),
+              function(c) {
+                paste0(kv_at(k, c), " * ", format_numeric(wk_at(c, d, h)))
+              },
+              character(1L)
+            )
+            nm <- paste0("orbital_mha_", lname, "_K_k", k, "_h", h, "_d", d)
+            mha_nms <- c(mha_nms, nm)
+            mha_exprs <- c(
+              mha_exprs,
+              paste0(
+                "(",
+                paste(terms, collapse = " + "),
+                " + ",
+                bk_at(d, h),
+                ")"
+              )
+            )
+            k_nm[k, h, d] <- nm
+          }
+        }
+      }
+
+      # V[k, h, d_v] = sum_c input_kv[k, c] * W_v(c, d_v, h) + b_v(d_v, h)
+      v_nm <- array(NA_character_, dim = c(T_kv, num_heads, value_dim))
+      for (k in seq_len(T_kv)) {
+        for (h in seq_len(num_heads)) {
+          for (d_v in seq_len(value_dim)) {
+            terms <- vapply(
+              seq_len(C_in),
+              function(c) {
+                paste0(kv_at(k, c), " * ", format_numeric(wv_at(c, d_v, h)))
+              },
+              character(1L)
+            )
+            nm <- paste0("orbital_mha_", lname, "_V_k", k, "_h", h, "_dv", d_v)
+            mha_nms <- c(mha_nms, nm)
+            mha_exprs <- c(
+              mha_exprs,
+              paste0(
+                "(",
+                paste(terms, collapse = " + "),
+                " + ",
+                bv_at(d_v, h),
+                ")"
+              )
+            )
+            v_nm[k, h, d_v] <- nm
+          }
+        }
+      }
+
+      # Scaled attention scores and softmax.
+      scale <- 1.0 / sqrt(as.numeric(key_dim))
+      attn_nm <- array(NA_character_, dim = c(T_q, T_kv, num_heads))
+      for (q in seq_len(T_q)) {
+        for (h in seq_len(num_heads)) {
+          exp_nms <- character(T_kv)
+          for (k in seq_len(T_kv)) {
+            dot_terms <- vapply(
+              seq_len(key_dim),
+              function(d) {
+                paste0(backtick(q_nm[q, h, d]), " * ", backtick(k_nm[k, h, d]))
+              },
+              character(1L)
+            )
+            score_expr <- paste0(
+              "((",
+              paste(dot_terms, collapse = " + "),
+              ") * ",
+              format_numeric(scale),
+              ")"
+            )
+            exp_nm <- paste0(
+              "orbital_mha_",
+              lname,
+              "_exp_q",
+              q,
+              "_k",
+              k,
+              "_h",
+              h
+            )
+            mha_nms <- c(mha_nms, exp_nm)
+            mha_exprs <- c(mha_exprs, paste0("exp(", score_expr, ")"))
+            exp_nms[k] <- exp_nm
+          }
+          sumexp_nm <- paste0("orbital_mha_", lname, "_sumexp_q", q, "_h", h)
+          mha_nms <- c(mha_nms, sumexp_nm)
+          mha_exprs <- c(
+            mha_exprs,
+            paste0("(", paste(backtick(exp_nms), collapse = " + "), ")")
+          )
+          for (k in seq_len(T_kv)) {
+            a_nm <- paste0(
+              "orbital_mha_",
+              lname,
+              "_attn_q",
+              q,
+              "_k",
+              k,
+              "_h",
+              h
+            )
+            mha_nms <- c(mha_nms, a_nm)
+            mha_exprs <- c(
+              mha_exprs,
+              paste0("(", backtick(exp_nms[k]), " / ", backtick(sumexp_nm), ")")
+            )
+            attn_nm[q, k, h] <- a_nm
+          }
+        }
+      }
+
+      # Head outputs: head[q, h, d_v] = sum_k attn[q,k,h] * V[k,h,d_v]
+      hout_nm <- array(NA_character_, dim = c(T_q, num_heads, value_dim))
+      for (q in seq_len(T_q)) {
+        for (h in seq_len(num_heads)) {
+          for (d_v in seq_len(value_dim)) {
+            terms <- vapply(
+              seq_len(T_kv),
+              function(k) {
+                paste0(
+                  backtick(attn_nm[q, k, h]),
+                  " * ",
+                  backtick(v_nm[k, h, d_v])
+                )
+              },
+              character(1L)
+            )
+            nm <- paste0(
+              "orbital_mha_",
+              lname,
+              "_hout_q",
+              q,
+              "_h",
+              h,
+              "_dv",
+              d_v
+            )
+            mha_nms <- c(mha_nms, nm)
+            mha_exprs <- c(
+              mha_exprs,
+              paste0("(", paste(terms, collapse = " + "), ")")
+            )
+            hout_nm[q, h, d_v] <- nm
+          }
+        }
+      }
+
+      # Output projection: out[q, d_out] = sum_h sum_dv hout[q,h,dv] * W_o(h,dv,d_out) + b_o
+      out_nms <- character(0)
+      for (q in seq_len(T_q)) {
+        for (d_out in seq_len(C_out_w)) {
+          terms <- c()
+          for (h in seq_len(num_heads)) {
+            for (d_v in seq_len(value_dim)) {
+              terms <- c(
+                terms,
+                paste0(
+                  backtick(hout_nm[q, h, d_v]),
+                  " * ",
+                  format_numeric(wo_at(h, d_v, d_out))
+                )
+              )
+            }
+          }
+          nm <- paste0("orbital_mha_", lname, "_out_q", q, "_d", d_out)
+          mha_nms <- c(mha_nms, nm)
+          mha_exprs <- c(
+            mha_exprs,
+            paste0(
+              "(",
+              paste(terms, collapse = " + "),
+              " + ",
+              bo_at(d_out),
+              ")"
+            )
+          )
+          out_nms <- c(out_nms, nm)
+        }
+      }
+
+      all_exprs[[lname]] <- stats::setNames(mha_exprs, mha_nms)
+      assign(lname, out_nms, envir = expr_reg)
     } else {
       cli::cli_abort(c(
         "Unsupported layer type in Keras Functional model: {.cls {cls_orig}}.",
@@ -2074,7 +2538,7 @@ orbital_keras_dag_impl <- function(
           "RMSNormalization, PReLU, GlobalAveragePooling1D, GlobalMaxPooling1D,",
           "AveragePooling1D, MaxPooling1D, GlobalSumPooling1D,",
           "Conv1D, LSTM, GRU, Bidirectional(LSTM/GRU), SimpleRNN,",
-          "UnitNormalization, ZeroPadding1D,",
+          "UnitNormalization, ZeroPadding1D, MultiHeadAttention,",
           "Dropout, Flatten, Reshape, Activation, Softmax."
         ),
         "i" = "Please file an issue: {.url https://github.com/davidrsch/orbital/issues/14}"
@@ -2151,8 +2615,8 @@ orbital_keras_impl <- function(
           "\\badd\\b|concatenate|batchnorm|layernorm|instancenorm|groupnorm|",
           "rmsnormalization|prelu|leakyrelu|\\belu\\b|globalaveragepool|",
           "globalmaxpool|averagepooling1d|maxpooling1d|globalsumpooling|",
-          "\\bactivation\\b|\\bsoftmax\\b|\\blstm\\b|\\bgru\\b|conv1d|",
-          "bidirectional|simplernn|unitnorm|zeropadding1d"
+          "\\brelu\\b|\\bactivation\\b|\\bsoftmax\\b|\\blstm\\b|\\bgru\\b|conv1d|",
+          "bidirectional|simplernn|unitnorm|zeropadding1d|multiheadattention"
         ),
         cls,
         perl = TRUE
