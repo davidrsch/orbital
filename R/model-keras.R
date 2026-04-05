@@ -771,8 +771,13 @@ orbital_keras_dag_impl <- function(
       )
       all_exprs[[lname]] <- stats::setNames(relu_exprs, unit_names)
       assign(lname, unit_names, envir = expr_reg)
-    } else if (grepl("\\bactivation\\b", cls, perl = TRUE)) {
+    } else if (
+      grepl("\\bactivation\\b", cls, perl = TRUE) && !grepl("softmax", cls)
+    ) {
       # Standalone Activation layer: apply activation function to inbound expressions
+      # NOTE: must be checked BEFORE the generic softmax branch is unnecessary —
+      # the !grepl("softmax") guard prevents Keras3 Softmax() layers (whose class
+      # path contains "activation") from being silently treated as linear identity.
       inbound <- topo_map[[lname]]
       if (is.null(inbound) || length(inbound) < 1L) {
         cli::cli_abort(
@@ -981,8 +986,12 @@ orbital_keras_dag_impl <- function(
           }
           n_valid <- length(window_bt)
           nm <- paste0("orbital_avgpool1d_", lname, "_", idx)
+          # For "same" padding, Keras 3 divides by pool_size (including
+          # implicit zero-padded positions), not by n_valid (in-bounds only).
+          # For "valid" padding all windows are full so pool_size == n_valid.
+          denom <- if (padding == "same") pool_size else n_valid
           pool_exprs[[idx]] <- if (n_valid > 0L) {
-            paste0("(", paste(window_bt, collapse = " + "), ") / ", n_valid)
+            paste0("(", paste(window_bt, collapse = " + "), ") / ", denom)
           } else {
             "0"
           }
@@ -1406,7 +1415,7 @@ orbital_keras_dag_impl <- function(
       )
       assign(lname, unit_names, envir = expr_reg)
     } else if (
-      grepl("conv1d", cls) && !grepl("depthwise|separable|2d|3d", cls)
+      grepl("conv1d", cls) && !grepl("depthwise|separable|transpose|2d|3d", cls)
     ) {
       # Conv1D ─ sliding-window 1-D convolution.
       # Keras weight layout:
@@ -2063,7 +2072,8 @@ orbital_keras_dag_impl <- function(
       assign(lname, out_nms, envir = expr_reg)
     } else if (grepl("unitnorm", cls)) {
       # UnitNormalization: L2-normalise each row across all features.
-      # y_i = x_i / sqrt(x_1^2 + ... + x_n^2 + eps)
+      # y_i = x_i / sqrt(max(x_1^2 + ... + x_n^2, 1e-7))
+      # Matches Keras 3: keras.backend.epsilon() = 1e-7 (float32 default).
       # Only axis = -1 (normalise over feature dimension) is supported.
       inbound <- topo_map[[lname]]
       in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
@@ -2071,7 +2081,7 @@ orbital_keras_dag_impl <- function(
       expr_bt <- backtick(in_exprs)
       norm_nm <- paste0("orbital_unitnorm_", lname, "_norm")
       sq_sum <- paste(paste0(expr_bt, "^2"), collapse = " + ")
-      norm_expr <- paste0("sqrt(", sq_sum, " + 1e-12)")
+      norm_expr <- paste0("sqrt(do.call(pmax, list(", sq_sum, ", 1e-7)))")
       unit_names <- paste0("orbital_unitnorm_", lname, "_h", seq_len(n_feat))
       unit_exprs <- vapply(
         seq_len(n_feat),
@@ -2396,12 +2406,15 @@ orbital_keras_dag_impl <- function(
         }
       }
 
-      # Scaled attention scores and softmax.
+      # Scaled attention scores and softmax (max-stabilised to prevent exp() overflow).
+      # For each (q, h) pair: subtract max_{k'} score before exp(), consistent with
+      # the standalone Softmax branches in this file.
       scale <- 1.0 / sqrt(as.numeric(key_dim))
       attn_nm <- array(NA_character_, dim = c(T_q, T_kv, num_heads))
       for (q in seq_len(T_q)) {
         for (h in seq_len(num_heads)) {
-          exp_nms <- character(T_kv)
+          # Collect raw scaled score expressions for all key positions
+          score_exprs <- character(T_kv)
           for (k in seq_len(T_kv)) {
             dot_terms <- vapply(
               seq_len(key_dim),
@@ -2410,13 +2423,29 @@ orbital_keras_dag_impl <- function(
               },
               character(1L)
             )
-            score_expr <- paste0(
+            score_exprs[k] <- paste0(
               "((",
               paste(dot_terms, collapse = " + "),
               ") * ",
               format_numeric(scale),
               ")"
             )
+          }
+
+          # Max-stabilisation: compute row-wise max of scores for (q, h)
+          max_nm <- paste0("orbital_mha_", lname, "_smax_q", q, "_h", h)
+          mha_nms <- c(mha_nms, max_nm)
+          mha_exprs <- c(
+            mha_exprs,
+            paste0(
+              "do.call(pmax, list(",
+              paste(score_exprs, collapse = ", "),
+              "))"
+            )
+          )
+
+          exp_nms <- character(T_kv)
+          for (k in seq_len(T_kv)) {
             exp_nm <- paste0(
               "orbital_mha_",
               lname,
@@ -2428,7 +2457,10 @@ orbital_keras_dag_impl <- function(
               h
             )
             mha_nms <- c(mha_nms, exp_nm)
-            mha_exprs <- c(mha_exprs, paste0("exp(", score_expr, ")"))
+            mha_exprs <- c(
+              mha_exprs,
+              paste0("exp(", score_exprs[k], " - `", max_nm, "`)")
+            )
             exp_nms[k] <- exp_nm
           }
           sumexp_nm <- paste0("orbital_mha_", lname, "_sumexp_q", q, "_h", h)
