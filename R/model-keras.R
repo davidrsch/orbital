@@ -540,6 +540,176 @@ orbital_keras_dag_impl <- function(
       )
       all_exprs[[lname]] <- stats::setNames(add_exprs, add_names)
       assign(lname, add_names, envir = expr_reg)
+    } else if (grepl("\\bmultiply\\b", cls, perl = TRUE)) {
+      # Element-wise Multiply: element-wise product of >=2 inputs
+      inbound <- topo_map[[lname]]
+      if (is.null(inbound) || length(inbound) < 2L) {
+        cli::cli_abort(
+          "Keras Multiply layer {.val {lname}} must have at least 2 inbound inputs, got {length(inbound)}."
+        )
+      }
+      all_inbound_exprs <- lapply(inbound, function(nm) {
+        get(nm, envir = expr_reg, inherits = FALSE)
+      })
+      widths <- lengths(all_inbound_exprs)
+      if (length(unique(widths)) != 1L) {
+        cli::cli_abort(
+          "Keras Multiply layer {.val {lname}}: all inputs must have the same width (got: {paste(widths, collapse = ', ')})."
+        )
+      }
+      mul_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
+      mul_exprs <- vapply(
+        seq_len(widths[1L]),
+        function(i) {
+          terms <- vapply(
+            all_inbound_exprs,
+            function(e) backtick(e[i]),
+            character(1L)
+          )
+          paste0("(", paste(terms, collapse = " * "), ")")
+        },
+        character(1L)
+      )
+      all_exprs[[lname]] <- stats::setNames(mul_exprs, mul_names)
+      assign(lname, mul_names, envir = expr_reg)
+    } else if (
+      grepl("\\baverage\\b", cls, perl = TRUE) && !grepl("pool|global", cls)
+    ) {
+      # Element-wise Average: mean of >=2 inputs
+      inbound <- topo_map[[lname]]
+      if (is.null(inbound) || length(inbound) < 2L) {
+        cli::cli_abort(
+          "Keras Average layer {.val {lname}} must have at least 2 inbound inputs, got {length(inbound)}."
+        )
+      }
+      all_inbound_exprs <- lapply(inbound, function(nm) {
+        get(nm, envir = expr_reg, inherits = FALSE)
+      })
+      widths <- lengths(all_inbound_exprs)
+      if (length(unique(widths)) != 1L) {
+        cli::cli_abort(
+          "Keras Average layer {.val {lname}}: all inputs must have the same width (got: {paste(widths, collapse = ', ')})."
+        )
+      }
+      n_inputs <- length(inbound)
+      avg_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
+      avg_exprs <- vapply(
+        seq_len(widths[1L]),
+        function(i) {
+          terms <- vapply(
+            all_inbound_exprs,
+            function(e) backtick(e[i]),
+            character(1L)
+          )
+          paste0(
+            "((",
+            paste(terms, collapse = " + "),
+            ") / ",
+            format_numeric(n_inputs),
+            ")"
+          )
+        },
+        character(1L)
+      )
+      all_exprs[[lname]] <- stats::setNames(avg_exprs, avg_names)
+      assign(lname, avg_names, envir = expr_reg)
+    } else if (grepl("\\bmaximum\\b", cls, perl = TRUE)) {
+      # Element-wise Maximum: per-element max over >=2 inputs
+      inbound <- topo_map[[lname]]
+      if (is.null(inbound) || length(inbound) < 2L) {
+        cli::cli_abort(
+          "Keras Maximum layer {.val {lname}} must have at least 2 inbound inputs, got {length(inbound)}."
+        )
+      }
+      all_inbound_exprs <- lapply(inbound, function(nm) {
+        get(nm, envir = expr_reg, inherits = FALSE)
+      })
+      widths <- lengths(all_inbound_exprs)
+      if (length(unique(widths)) != 1L) {
+        cli::cli_abort(
+          "Keras Maximum layer {.val {lname}}: all inputs must have the same width (got: {paste(widths, collapse = ', ')})."
+        )
+      }
+      max_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
+      max_exprs <- vapply(
+        seq_len(widths[1L]),
+        function(i) {
+          terms <- vapply(
+            all_inbound_exprs,
+            function(e) backtick(e[i]),
+            character(1L)
+          )
+          paste0("pmax(", paste(terms, collapse = ", "), ")")
+        },
+        character(1L)
+      )
+      all_exprs[[lname]] <- stats::setNames(max_exprs, max_names)
+      assign(lname, max_names, envir = expr_reg)
+    } else if (grepl("\\bminimum\\b", cls, perl = TRUE)) {
+      # Element-wise Minimum: per-element min over >=2 inputs
+      inbound <- topo_map[[lname]]
+      if (is.null(inbound) || length(inbound) < 2L) {
+        cli::cli_abort(
+          "Keras Minimum layer {.val {lname}} must have at least 2 inbound inputs, got {length(inbound)}."
+        )
+      }
+      all_inbound_exprs <- lapply(inbound, function(nm) {
+        get(nm, envir = expr_reg, inherits = FALSE)
+      })
+      widths <- lengths(all_inbound_exprs)
+      if (length(unique(widths)) != 1L) {
+        cli::cli_abort(
+          "Keras Minimum layer {.val {lname}}: all inputs must have the same width (got: {paste(widths, collapse = ', ')})."
+        )
+      }
+      min_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
+      min_exprs <- vapply(
+        seq_len(widths[1L]),
+        function(i) {
+          terms <- vapply(
+            all_inbound_exprs,
+            function(e) backtick(e[i]),
+            character(1L)
+          )
+          paste0("pmin(", paste(terms, collapse = ", "), ")")
+        },
+        character(1L)
+      )
+      all_exprs[[lname]] <- stats::setNames(min_exprs, min_names)
+      assign(lname, min_names, envir = expr_reg)
+    } else if (grepl("\\bdot\\b", cls, perl = TRUE)) {
+      # Dot product: sum of element-wise products of exactly 2 inputs (axes=-1)
+      inbound <- topo_map[[lname]]
+      if (is.null(inbound) || length(inbound) != 2L) {
+        cli::cli_abort(
+          "Keras Dot layer {.val {lname}} requires exactly 2 inbound inputs, got {length(inbound)}."
+        )
+      }
+      exprs_a <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      exprs_b <- get(inbound[2L], envir = expr_reg, inherits = FALSE)
+      if (length(exprs_a) != length(exprs_b)) {
+        cli::cli_abort(
+          "Keras Dot layer {.val {lname}}: both inputs must have the same width."
+        )
+      }
+      cfg <- tryCatch(l$get_config(), error = function(e) list())
+      axes <- tryCatch(as.integer(cfg$axes), error = function(e) -1L)
+      if (!all(axes %in% c(-1L, 1L))) {
+        cli::cli_abort(
+          "Keras Dot layer {.val {lname}}: only axes=-1 (feature-axis dot product) is supported."
+        )
+      }
+      dot_name <- paste0("orbital_", lname, "_dot")
+      terms <- vapply(
+        seq_along(exprs_a),
+        function(i) {
+          paste0("(", backtick(exprs_a[i]), " * ", backtick(exprs_b[i]), ")")
+        },
+        character(1L)
+      )
+      dot_expr <- paste0("(", paste(terms, collapse = " + "), ")")
+      all_exprs[[lname]] <- stats::setNames(dot_expr, dot_name)
+      assign(lname, dot_name, envir = expr_reg)
     } else if (grepl("concatenate", cls)) {
       # Concatenate: merge expression-name vectors from all inbound branches
       inbound <- topo_map[[lname]]
@@ -1414,6 +1584,315 @@ orbital_keras_dag_impl <- function(
         stats::setNames(sm_exprs, unit_names)
       )
       assign(lname, unit_names, envir = expr_reg)
+    } else if (grepl("conv1dtranspose", cls)) {
+      # Conv1DTranspose ─ transposed (fractionally-strided) 1-D convolution.
+      # Keras weight layout (same as Conv1D):
+      #   kernel : (kernel_size, in_channels, filters)  i.e. (kW, C_in, C_out)
+      #   bias   : (filters,)  [optional]
+      # Dilations > 1 are not supported (raise cli_abort).
+      # Padding: "valid" or "same".
+      # W_out formula:
+      #   valid: W_out = (W_in - 1) * stride + kW
+      #   same:  W_out = W_in * stride
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+
+      wts <- l$get_weights()
+      kern <- wts[[1L]] # (kW, C_in, C_out)
+      k_w <- dim(kern)[1L]
+      c_in <- dim(kern)[2L]
+      c_out <- dim(kern)[3L]
+      bias_v <- if (length(wts) >= 2L) as.numeric(wts[[2L]]) else numeric(c_out)
+
+      cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+      stride <- tryCatch(as.integer(cfg_l$strides[[1L]]), error = function(e) {
+        1L
+      })
+      dilation <- tryCatch(
+        as.integer(cfg_l$dilation_rate[[1L]]),
+        error = function(e) 1L
+      )
+      pad_type <- tryCatch(
+        tolower(as.character(cfg_l$padding)),
+        error = function(e) "valid"
+      )
+      if (is.null(stride) || is.na(stride)) {
+        stride <- 1L
+      }
+      if (is.null(dilation) || is.na(dilation)) {
+        dilation <- 1L
+      }
+      if (!nzchar(pad_type %||% "")) {
+        pad_type <- "valid"
+      }
+
+      if (dilation > 1L) {
+        cli::cli_abort(
+          "Keras Conv1DTranspose layer {.val {lname}}: dilation_rate > 1 is not supported."
+        )
+      }
+
+      n_total <- length(in_exprs)
+      w_in <- as.integer(n_total / c_in)
+
+      if (pad_type == "same") {
+        w_out <- w_in * stride
+        pad_total <- max(0L, k_w - stride)
+        pad_l <- as.integer(floor(pad_total / 2L))
+      } else {
+        # "valid"
+        w_out <- (w_in - 1L) * stride + k_w
+        pad_l <- 0L
+      }
+
+      tconv_nms <- character(0L)
+      tconv_exprs <- character(0L)
+
+      # For each output position q (0-indexed) and output channel f,
+      # gather all input (p, k, c) triples that contribute:
+      #   out[q, f] = sum_{p,k,c} in[p, c] * kern[k, c, f]
+      # where p * stride + k - pad_l == q  (dilation=1)
+      for (q in seq_len(w_out)) {
+        q0 <- q - 1L
+        for (f in seq_len(c_out)) {
+          terms <- character(0L)
+          for (k in seq_len(k_w)) {
+            k0 <- k - 1L
+            # p * stride = q0 + pad_l - k0
+            num <- q0 + pad_l - k0
+            if (num >= 0L && num %% stride == 0L) {
+              p0 <- as.integer(num / stride)
+              if (p0 >= 0L && p0 < w_in) {
+                for (c in seq_len(c_in)) {
+                  feat_nm <- in_exprs[p0 * c_in + c]
+                  wt_val <- format_numeric(kern[k, c, f])
+                  terms <- c(
+                    terms,
+                    paste0("(", backtick(feat_nm), " * ", wt_val, ")")
+                  )
+                }
+              }
+            }
+          }
+          b_str <- format_numeric(bias_v[f])
+          expr_str <- if (length(terms) == 0L) {
+            b_str
+          } else {
+            paste0("(", paste(c(terms, b_str), collapse = " + "), ")")
+          }
+          nm <- paste0("orbital_tconv_", lname, "_q", q, "_f", f)
+          tconv_nms <- c(tconv_nms, nm)
+          tconv_exprs <- c(tconv_exprs, expr_str)
+        }
+      }
+      all_exprs[[lname]] <- stats::setNames(tconv_exprs, tconv_nms)
+      assign(lname, tconv_nms, envir = expr_reg)
+    } else if (grepl("depthwiseconv1d", cls)) {
+      # DepthwiseConv1D ─ channel-wise 1-D convolution (no cross-channel mixing).
+      # Keras weight layout:
+      #   depthwise_kernel : (kernel_size, in_channels, depth_multiplier)
+      #   bias             : (in_channels * depth_multiplier,)  [optional]
+      # orbital output convention: T_out × (C_in * depth_mult) columns, time-step major.
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+
+      wts <- l$get_weights()
+      dw_kern <- wts[[1L]] # (kW, C_in, depth_mult)
+      k_w <- dim(dw_kern)[1L]
+      c_in <- dim(dw_kern)[2L]
+      depth_mult <- dim(dw_kern)[3L]
+      c_out <- c_in * depth_mult
+      bias_v <- if (length(wts) >= 2L) as.numeric(wts[[2L]]) else numeric(c_out)
+
+      cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+      stride <- tryCatch(as.integer(cfg_l$strides[[1L]]), error = function(e) {
+        1L
+      })
+      dilation <- tryCatch(
+        as.integer(cfg_l$dilation_rate[[1L]]),
+        error = function(e) 1L
+      )
+      pad_type <- tryCatch(
+        tolower(as.character(cfg_l$padding)),
+        error = function(e) "valid"
+      )
+      if (is.null(stride) || is.na(stride)) {
+        stride <- 1L
+      }
+      if (is.null(dilation) || is.na(dilation)) {
+        dilation <- 1L
+      }
+      if (!nzchar(pad_type %||% "")) {
+        pad_type <- "valid"
+      }
+
+      n_total <- length(in_exprs)
+      w_in <- as.integer(n_total / c_in)
+      k_eff <- dilation * (k_w - 1L) + 1L
+
+      if (pad_type == "same") {
+        w_out <- as.integer(ceiling(w_in / stride))
+        pad_total <- max(0L, (w_out - 1L) * stride + k_eff - w_in)
+        pad_l <- as.integer(floor(pad_total / 2L))
+      } else {
+        w_out <- as.integer(floor((w_in - k_eff) / stride) + 1L)
+        pad_l <- 0L
+      }
+
+      dw_nms <- character(0L)
+      dw_exprs <- character(0L)
+      for (p in seq_len(w_out)) {
+        p0 <- p - 1L
+        for (c in seq_len(c_in)) {
+          for (d in seq_len(depth_mult)) {
+            terms <- character(0L)
+            for (k in seq_len(k_w)) {
+              k0 <- k - 1L
+              w_pos <- p0 * stride + k0 * dilation - pad_l
+              if (w_pos >= 0L && w_pos < w_in) {
+                feat_nm <- in_exprs[w_pos * c_in + c]
+                wt_val <- format_numeric(dw_kern[k, c, d])
+                terms <- c(
+                  terms,
+                  paste0("(", backtick(feat_nm), " * ", wt_val, ")")
+                )
+              }
+            }
+            ch_out <- (c - 1L) * depth_mult + d
+            b_str <- format_numeric(bias_v[ch_out])
+            expr_str <- if (length(terms) == 0L) {
+              b_str
+            } else {
+              paste0("(", paste(c(terms, b_str), collapse = " + "), ")")
+            }
+            nm <- paste0("orbital_dw_", lname, "_p", p, "_c", ch_out)
+            dw_nms <- c(dw_nms, nm)
+            dw_exprs <- c(dw_exprs, expr_str)
+          }
+        }
+      }
+      all_exprs[[lname]] <- stats::setNames(dw_exprs, dw_nms)
+      assign(lname, dw_nms, envir = expr_reg)
+    } else if (grepl("separableconv1d", cls)) {
+      # SeparableConv1D ─ depthwise + pointwise 1-D convolution.
+      # Keras weight layout:
+      #   depthwise_kernel  : (kernel_size, in_channels, depth_multiplier)
+      #   pointwise_kernel  : (1, in_channels * depth_multiplier, out_channels)
+      #   bias              : (out_channels,)  [optional]
+      # Two-stage process:
+      #   1. Depthwise conv: C_in * depth_mult intermediate channels per timestep.
+      #   2. Pointwise conv: 1x1 linear projection to C_out.
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+
+      wts <- l$get_weights()
+      dw_kern <- wts[[1L]] # (kW, C_in, depth_mult)
+      pw_kern <- wts[[2L]] # (1, C_in * depth_mult, C_out)
+      k_w <- dim(dw_kern)[1L]
+      c_in <- dim(dw_kern)[2L]
+      depth_mult <- dim(dw_kern)[3L]
+      c_mid <- c_in * depth_mult
+      c_out <- dim(pw_kern)[3L]
+      bias_v <- if (length(wts) >= 3L) as.numeric(wts[[3L]]) else numeric(c_out)
+
+      cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+      stride <- tryCatch(as.integer(cfg_l$strides[[1L]]), error = function(e) {
+        1L
+      })
+      dilation <- tryCatch(
+        as.integer(cfg_l$dilation_rate[[1L]]),
+        error = function(e) 1L
+      )
+      pad_type <- tryCatch(
+        tolower(as.character(cfg_l$padding)),
+        error = function(e) "valid"
+      )
+      if (is.null(stride) || is.na(stride)) {
+        stride <- 1L
+      }
+      if (is.null(dilation) || is.na(dilation)) {
+        dilation <- 1L
+      }
+      if (!nzchar(pad_type %||% "")) {
+        pad_type <- "valid"
+      }
+
+      n_total <- length(in_exprs)
+      w_in <- as.integer(n_total / c_in)
+      k_eff <- dilation * (k_w - 1L) + 1L
+
+      if (pad_type == "same") {
+        w_out <- as.integer(ceiling(w_in / stride))
+        pad_total <- max(0L, (w_out - 1L) * stride + k_eff - w_in)
+        pad_l <- as.integer(floor(pad_total / 2L))
+      } else {
+        w_out <- as.integer(floor((w_in - k_eff) / stride) + 1L)
+        pad_l <- 0L
+      }
+
+      # Stage 1: depthwise intermediates (no cross-channel mixing).
+      dw_nms <- character(0L)
+      dw_exprs <- character(0L)
+      for (p in seq_len(w_out)) {
+        p0 <- p - 1L
+        for (c in seq_len(c_in)) {
+          for (d in seq_len(depth_mult)) {
+            terms <- character(0L)
+            for (k in seq_len(k_w)) {
+              k0 <- k - 1L
+              w_pos <- p0 * stride + k0 * dilation - pad_l
+              if (w_pos >= 0L && w_pos < w_in) {
+                feat_nm <- in_exprs[w_pos * c_in + c]
+                wt_val <- format_numeric(dw_kern[k, c, d])
+                terms <- c(
+                  terms,
+                  paste0("(", backtick(feat_nm), " * ", wt_val, ")")
+                )
+              }
+            }
+            c2 <- (c - 1L) * depth_mult + d
+            expr_str <- if (length(terms) == 0L) {
+              "0"
+            } else {
+              paste0("(", paste(terms, collapse = " + "), ")")
+            }
+            nm <- paste0("orbital_sep_dw_", lname, "_p", p, "_c", c2)
+            dw_nms <- c(dw_nms, nm)
+            dw_exprs <- c(dw_exprs, expr_str)
+          }
+        }
+      }
+
+      # Stage 2: pointwise 1x1 projection to C_out.
+      sep_nms <- character(0L)
+      sep_exprs <- character(0L)
+      for (p in seq_len(w_out)) {
+        for (f in seq_len(c_out)) {
+          terms <- character(0L)
+          for (c2 in seq_len(c_mid)) {
+            dw_nm <- paste0("orbital_sep_dw_", lname, "_p", p, "_c", c2)
+            wt_val <- format_numeric(pw_kern[1L, c2, f])
+            terms <- c(
+              terms,
+              paste0("(", backtick(dw_nm), " * ", wt_val, ")")
+            )
+          }
+          b_str <- format_numeric(bias_v[f])
+          expr_str <- if (length(terms) == 0L) {
+            b_str
+          } else {
+            paste0("(", paste(c(terms, b_str), collapse = " + "), ")")
+          }
+          nm <- paste0("orbital_sep_", lname, "_p", p, "_f", f)
+          sep_nms <- c(sep_nms, nm)
+          sep_exprs <- c(sep_exprs, expr_str)
+        }
+      }
+      all_exprs[[lname]] <- c(
+        stats::setNames(dw_exprs, dw_nms),
+        stats::setNames(sep_exprs, sep_nms)
+      )
+      assign(lname, sep_nms, envir = expr_reg)
     } else if (
       grepl("conv1d", cls) && !grepl("depthwise|separable|transpose|2d|3d", cls)
     ) {
@@ -2075,6 +2554,21 @@ orbital_keras_dag_impl <- function(
       # y_i = x_i / sqrt(max(x_1^2 + ... + x_n^2, 1e-7))
       # Matches Keras 3: keras.backend.epsilon() = 1e-7 (float32 default).
       # Only axis = -1 (normalise over feature dimension) is supported.
+      unit_axis_raw <- tryCatch(
+        as.integer(unlist(l$get_config()$axis)[[1L]]),
+        error = function(e) -1L
+      )
+      if (is.na(unit_axis_raw)) {
+        unit_axis_raw <- -1L
+      }
+      if (!unit_axis_raw %in% c(-1L, 1L)) {
+        cli::cli_abort(
+          c(
+            "UnitNormalization layer {.val {lname}}: axis = {.val {unit_axis_raw}} is not supported.",
+            "i" = "Only axis = -1 (feature-wise L2 normalisation) is supported by orbital."
+          )
+        )
+      }
       inbound <- topo_map[[lname]]
       in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
       n_feat <- length(in_exprs)
@@ -2153,6 +2647,462 @@ orbital_keras_dag_impl <- function(
       }
       all_exprs[[lname]] <- stats::setNames(out_exprs, out_nms)
       assign(lname, out_nms, envir = expr_reg)
+    } else if (grepl("permute", cls) && !grepl("2d|3d", cls)) {
+      # Permute: reorder the axes (dimensions) of the input tensor.
+      # In the tabular/1D context the input is [T × C] (time-step major flat).
+      # cfg$dims is 1-indexed (Keras convention) over the non-batch axes.
+      # For a 2-D input the only supported permutations are (1,2) (no-op) and (2,1).
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      in_names <- in_exprs # column-name vector
+
+      cfg <- tryCatch(l$get_config(), error = function(e) list())
+      dims <- tryCatch(as.integer(unlist(cfg$dims)), error = function(e) {
+        c(1L, 2L)
+      })
+
+      if (length(dims) == 2L && all(dims == c(1L, 2L))) {
+        # No-op permutation (1,2): pass through unchanged.
+        perm_names <- in_names
+      } else if (length(dims) == 2L && all(dims == c(2L, 1L))) {
+        # Transpose: swap T and C.
+        in_shape <- tryCatch(
+          as.integer(unlist(l$input_shape)),
+          error = function(e) NULL
+        )
+        C_feat <- if (!is.null(in_shape) && length(in_shape) >= 1L) {
+          tail(in_shape[!is.na(in_shape)], 1L)
+        } else {
+          1L
+        }
+        T_in <- length(in_names) / C_feat
+        # Transposed: iterate over C first then T (column-major → row-major swap)
+        perm_names <- character(length(in_names))
+        for (c_i in seq_len(C_feat)) {
+          for (t_i in seq_len(T_in)) {
+            perm_names[[(c_i - 1L) * T_in + t_i]] <- in_names[[
+              (t_i - 1L) * C_feat + c_i
+            ]]
+          }
+        }
+      } else {
+        cli::cli_abort(
+          "Keras Permute layer {.val {lname}}: unsupported dims {paste(dims, collapse=',')}. Only (1,2) and (2,1) are supported."
+        )
+      }
+      perm_out_nms <- paste0(
+        "orbital_permute_",
+        lname,
+        "_h",
+        seq_along(perm_names)
+      )
+      all_exprs[[lname]] <- stats::setNames(perm_names, perm_out_nms)
+      assign(lname, perm_out_nms, envir = expr_reg)
+    } else if (grepl("cropping1d", cls)) {
+      # Cropping1D: remove timesteps from the beginning and end of the sequence.
+      # cfg$cropping = [left, right] (number of timesteps to remove from each end).
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+
+      cfg <- tryCatch(l$get_config(), error = function(e) list())
+      cropping_raw <- tryCatch(
+        as.integer(unlist(cfg$cropping)),
+        error = function(e) c(1L, 1L)
+      )
+      crop_left <- if (length(cropping_raw) >= 1L) cropping_raw[[1L]] else 1L
+      crop_right <- if (length(cropping_raw) >= 2L) {
+        cropping_raw[[2L]]
+      } else {
+        cropping_raw[[1L]]
+      }
+
+      in_shape <- tryCatch(
+        as.integer(unlist(l$input_shape)),
+        error = function(e) NULL
+      )
+      C_feat <- if (!is.null(in_shape) && length(in_shape) >= 1L) {
+        tail(in_shape[!is.na(in_shape)], 1L)
+      } else {
+        1L
+      }
+      T_in <- as.integer(length(in_exprs) / C_feat)
+      T_out <- T_in - crop_left - crop_right
+      if (T_out <= 0L) {
+        cli::cli_abort(
+          "Keras Cropping1D layer {.val {lname}}: cropping ({crop_left},{crop_right}) removes all {T_in} timesteps."
+        )
+      }
+
+      start_idx <- crop_left * C_feat + 1L
+      end_idx <- (T_in - crop_right) * C_feat
+      out_exprs <- in_exprs[start_idx:end_idx]
+      out_nms <- paste0("orbital_crop_", lname, "_h", seq_along(out_exprs))
+      all_exprs[[lname]] <- stats::setNames(out_exprs, out_nms)
+      assign(lname, out_nms, envir = expr_reg)
+    } else if (grepl("repeatvector", cls)) {
+      # RepeatVector: replicate the (flat) input feature vector n times.
+      # cfg$n = repetition count; output shape = [n × C_in].
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+
+      cfg <- tryCatch(l$get_config(), error = function(e) list())
+      n_rep <- tryCatch(as.integer(cfg[["n"]]), error = function(e) 1L)
+      if (is.na(n_rep) || n_rep < 1L) {
+        cli::cli_abort(
+          "Keras RepeatVector layer {.val {lname}}: n must be a positive integer, got {n_rep}."
+        )
+      }
+
+      out_exprs <- rep(in_exprs, times = n_rep)
+      out_nms <- paste0("orbital_repvec_", lname, "_h", seq_along(out_exprs))
+      all_exprs[[lname]] <- stats::setNames(out_exprs, out_nms)
+      assign(lname, out_nms, envir = expr_reg)
+    } else if (
+      grepl("\\battention\\b", cls, perl = TRUE) && !grepl("multihead", cls)
+    ) {
+      # Attention (Luong / dot-product): single-head dot-product soft-attention.
+      # Inputs (inbound): [query, value] or [query, value, key].
+      #   query shape: (T_q, D)  — flat layout T_q * D columns
+      #   value shape: (T_v, D_v) — flat layout T_v * D_v columns
+      #   key   shape: (T_k, D)  — defaults to value if not provided
+      # use_scale = FALSE (default): no learned scale.
+      # Algorithm:
+      #   score[q, k] = sum_d query[q,d] * key[k,d]
+      #   attn[q, k]  = softmax over k (max-stabilised)
+      #   out[q, d_v] = sum_k attn[q,k] * value[k, d_v]
+      inbound <- topo_map[[lname]]
+      if (is.null(inbound) || length(inbound) < 2L) {
+        cli::cli_abort(
+          "Keras Attention layer {.val {lname}} requires at least 2 inbound inputs (query, value)."
+        )
+      }
+      q_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      v_exprs <- get(inbound[2L], envir = expr_reg, inherits = FALSE)
+      k_exprs <- if (length(inbound) >= 3L) {
+        get(inbound[3L], envir = expr_reg, inherits = FALSE)
+      } else {
+        v_exprs # key defaults to value
+      }
+
+      cfg_att <- tryCatch(l$get_config(), error = function(e) list())
+      use_scale_att <- tryCatch(
+        as.logical(cfg_att$use_scale),
+        error = function(e) FALSE
+      )
+      if (isTRUE(use_scale_att) && length(l$get_weights()) > 0L) {
+        cli::cli_abort(
+          "Keras Attention layer {.val {lname}}: use_scale=TRUE is not yet supported."
+        )
+      }
+
+      # Infer shapes from input sizes.  Both query and key must have same depth D.
+      # For self-attention query==key, D_q must equal D_k.
+      # We infer T_q, D from q_exprs length, T_v and D_v from v_exprs,
+      # T_k and D_k from k_exprs.  We need D_q == D_k for dot-product.
+      # The simplest inference path: assume square sequence & same depth.
+      in_shape_q <- tryCatch(
+        as.integer(unlist(l$input_spec[[1L]]$shape)),
+        error = function(e) NULL
+      )
+      in_shape_v <- tryCatch(
+        as.integer(unlist(l$input_spec[[2L]]$shape)),
+        error = function(e) NULL
+      )
+
+      D_q <- if (!is.null(in_shape_q) && length(in_shape_q) >= 1L) {
+        tail(in_shape_q[!is.na(in_shape_q)], 1L)
+      } else {
+        # Fallback: assume square — length = T^2 or T * D; try sqrt
+        as.integer(sqrt(length(q_exprs)))
+      }
+      T_q <- as.integer(length(q_exprs) / D_q)
+
+      D_v <- if (!is.null(in_shape_v) && length(in_shape_v) >= 1L) {
+        tail(in_shape_v[!is.na(in_shape_v)], 1L)
+      } else {
+        D_q
+      }
+      T_v <- as.integer(length(v_exprs) / D_v)
+      T_k <- as.integer(length(k_exprs) / D_q)
+
+      # Compute scores: score[q_i, k_j] = sum_d q_exprs[(q_i-1)*D_q + d] * k_exprs[(k_j-1)*D_q + d]
+      # Then max-stabilised softmax over k for each q_i.
+      att_out_exprs <- character(0L)
+      att_out_nms <- character(0L)
+
+      score_nms <- matrix(
+        paste0(
+          "orbital_att_",
+          lname,
+          "_sc_q",
+          rep(seq_len(T_q), each = T_k),
+          "_k",
+          rep(seq_len(T_k), T_q)
+        ),
+        nrow = T_q,
+        ncol = T_k
+      )
+      score_exprs <- matrix("", nrow = T_q, ncol = T_k)
+      for (q_i in seq_len(T_q)) {
+        for (k_j in seq_len(T_k)) {
+          terms <- vapply(
+            seq_len(D_q),
+            function(d) {
+              paste0(
+                "(",
+                backtick(q_exprs[(q_i - 1L) * D_q + d]),
+                " * ",
+                backtick(k_exprs[(k_j - 1L) * D_q + d]),
+                ")"
+              )
+            },
+            character(1L)
+          )
+          score_exprs[q_i, k_j] <- paste0(
+            "(",
+            paste(terms, collapse = " + "),
+            ")"
+          )
+        }
+      }
+
+      # For each q_i, compute softmax over k dimension (max-stabilised).
+      for (q_i in seq_len(T_q)) {
+        sc_names <- score_nms[q_i, ]
+        sc_expr_q <- score_exprs[q_i, ]
+
+        # Register score intermediates
+        for (k_j in seq_len(T_k)) {
+          all_exprs[[lname]] <- c(
+            all_exprs[[lname]],
+            stats::setNames(sc_expr_q[k_j], sc_names[k_j])
+          )
+        }
+
+        max_nm <- paste0("orbital_att_", lname, "_max_q", q_i)
+        max_expr <- paste0(
+          "pmax(",
+          paste(backtick(sc_names), collapse = ", "),
+          ")"
+        )
+        all_exprs[[lname]] <- c(
+          all_exprs[[lname]],
+          stats::setNames(max_expr, max_nm)
+        )
+
+        exp_nms <- paste0(
+          "orbital_att_",
+          lname,
+          "_exp_q",
+          q_i,
+          "_k",
+          seq_len(T_k)
+        )
+        exp_exprs <- vapply(
+          sc_names,
+          function(s) paste0("exp(", backtick(s), " - ", backtick(max_nm), ")"),
+          character(1L)
+        )
+        for (k_j in seq_len(T_k)) {
+          all_exprs[[lname]] <- c(
+            all_exprs[[lname]],
+            stats::setNames(exp_exprs[k_j], exp_nms[k_j])
+          )
+        }
+
+        sum_nm <- paste0("orbital_att_", lname, "_sum_q", q_i)
+        sum_expr <- paste0("(", paste(backtick(exp_nms), collapse = " + "), ")")
+        all_exprs[[lname]] <- c(
+          all_exprs[[lname]],
+          stats::setNames(sum_expr, sum_nm)
+        )
+
+        attn_nms <- paste0(
+          "orbital_att_",
+          lname,
+          "_attn_q",
+          q_i,
+          "_k",
+          seq_len(T_k)
+        )
+        attn_exprs <- vapply(
+          exp_nms,
+          function(e) paste0("(", backtick(e), " / ", backtick(sum_nm), ")"),
+          character(1L)
+        )
+        for (k_j in seq_len(T_k)) {
+          all_exprs[[lname]] <- c(
+            all_exprs[[lname]],
+            stats::setNames(attn_exprs[k_j], attn_nms[k_j])
+          )
+        }
+
+        # Output: weighted sum over value
+        for (d_v in seq_len(D_v)) {
+          terms <- vapply(
+            seq_len(T_v),
+            function(k_j) {
+              paste0(
+                "(",
+                backtick(attn_nms[k_j]),
+                " * ",
+                backtick(v_exprs[(k_j - 1L) * D_v + d_v]),
+                ")"
+              )
+            },
+            character(1L)
+          )
+          out_expr <- paste0("(", paste(terms, collapse = " + "), ")")
+          out_nm <- paste0("orbital_att_", lname, "_out_q", q_i, "_d", d_v)
+          att_out_exprs <- c(att_out_exprs, out_expr)
+          att_out_nms <- c(att_out_nms, out_nm)
+          all_exprs[[lname]] <- c(
+            all_exprs[[lname]],
+            stats::setNames(out_expr, out_nm)
+          )
+        }
+      }
+      assign(lname, att_out_nms, envir = expr_reg)
+    } else if (grepl("timedistributed", cls)) {
+      # TimeDistributed: apply a layer independently to each timestep.
+      # Supports Dense inner layer; other inner types raise cli_abort.
+      # Input:  T_in x C_in flat columns (time-step major).
+      # Output: T_in x units flat columns (time-step major).
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+
+      inner <- tryCatch(l$layer, error = function(e) NULL)
+      if (is.null(inner)) {
+        cli::cli_abort(
+          "Keras TimeDistributed layer {.val {lname}}: cannot access wrapped layer."
+        )
+      }
+      inner_cls <- tolower(class(inner)[1L])
+
+      if (grepl("dense", inner_cls)) {
+        inner_wts <- inner$get_weights()
+        if (length(inner_wts) < 1L) {
+          cli::cli_abort(
+            "Keras TimeDistributed(Dense) layer {.val {lname}}: no weights found."
+          )
+        }
+        kern_td <- t(inner_wts[[1L]]) # (units x C_in)
+        bias_td <- if (length(inner_wts) >= 2L) {
+          as.numeric(inner_wts[[2L]])
+        } else {
+          numeric(nrow(kern_td))
+        }
+        units <- nrow(kern_td)
+        c_in_td <- ncol(kern_td)
+        T_steps <- as.integer(length(in_exprs) / c_in_td)
+
+        activation_config_td <- tryCatch(
+          inner$get_config()$activation,
+          error = function(e) NULL
+        )
+        activation_td <- if (is.null(activation_config_td)) {
+          "linear"
+        } else if (is.list(activation_config_td)) {
+          tolower(as.character(activation_config_td$class_name)[1L])
+        } else {
+          tolower(as.character(activation_config_td)[1L])
+        }
+        if (!nzchar(activation_td)) {
+          activation_td <- "linear"
+        }
+        act_alpha_td <- if (
+          is.list(activation_config_td) &&
+            !is.null(activation_config_td[["config"]])
+        ) {
+          activation_config_td[["config"]][["alpha"]]
+        } else {
+          NULL
+        }
+
+        td_nms <- character(0L)
+        td_exprs <- character(0L)
+        for (t in seq_len(T_steps)) {
+          t_in <- in_exprs[((t - 1L) * c_in_td + 1L):(t * c_in_td)]
+          pre_act <- build_mlp_pre_act(kern_td, bias_td, t_in)
+          act_str <- vapply(
+            pre_act,
+            function(z) activation_expr(activation_td, z, alpha = act_alpha_td),
+            character(1L)
+          )
+          step_nms <- paste0(
+            "orbital_td_",
+            lname,
+            "_t",
+            t,
+            "_h",
+            seq_len(units)
+          )
+          td_nms <- c(td_nms, step_nms)
+          td_exprs <- c(td_exprs, act_str)
+        }
+        all_exprs[[lname]] <- stats::setNames(td_exprs, td_nms)
+        assign(lname, td_nms, envir = expr_reg)
+      } else {
+        cli::cli_abort(c(
+          "Keras TimeDistributed layer {.val {lname}} wraps unsupported inner layer type {.cls {inner_cls}}.",
+          "i" = "orbital currently supports TimeDistributed(Dense) only."
+        ))
+      }
+    } else if (grepl("\\bembedding\\b", cls, perl = TRUE)) {
+      # Embedding: integer index lookup into a dense weight matrix.
+      # Keras weight layout:
+      #   embeddings : (vocab_size, embed_dim)
+      # Input:  T flat integer columns (one token index per timestep, 0-indexed).
+      # Output: T x embed_dim flat columns (time-step major).
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+
+      wts <- l$get_weights()
+      emb_mat <- wts[[1L]] # (vocab_size, embed_dim)
+      vocab_size <- dim(emb_mat)[1L]
+      embed_dim <- dim(emb_mat)[2L]
+
+      if (vocab_size > 10000L) {
+        cli::cli_warn(c(
+          "Keras Embedding layer {.val {lname}}: vocabulary size {vocab_size} is large.",
+          "i" = paste(
+            "Generated case_when expressions may be very long.",
+            "Consider reducing vocabulary size."
+          )
+        ))
+      }
+
+      T_in <- length(in_exprs) # one column per token position
+      emb_nms <- character(0L)
+      emb_exprs <- character(0L)
+      for (t in seq_len(T_in)) {
+        in_col <- in_exprs[t]
+        for (d in seq_len(embed_dim)) {
+          cases <- vapply(
+            seq_len(vocab_size),
+            function(i) {
+              paste0(
+                backtick(in_col),
+                " == ",
+                i - 1L,
+                "L ~ ",
+                format_numeric(emb_mat[i, d])
+              )
+            },
+            character(1L)
+          )
+          expr_str <- paste0(
+            "dplyr::case_when(",
+            paste(cases, collapse = ", "),
+            ", TRUE ~ NA_real_)"
+          )
+          nm <- paste0("orbital_emb_", lname, "_t", t, "_d", d)
+          emb_nms <- c(emb_nms, nm)
+          emb_exprs <- c(emb_exprs, expr_str)
+        }
+      }
+      all_exprs[[lname]] <- stats::setNames(emb_exprs, emb_nms)
+      assign(lname, emb_nms, envir = expr_reg)
     } else if (grepl("multiheadattention", cls)) {
       # MultiHeadAttention: scaled dot-product self-attention or cross-attention.
       # Supports: fixed-length sequences; causal_mask = FALSE; use_bias = TRUE/FALSE.
@@ -2570,8 +3520,8 @@ orbital_keras_dag_impl <- function(
           "RMSNormalization, PReLU, GlobalAveragePooling1D, GlobalMaxPooling1D,",
           "AveragePooling1D, MaxPooling1D, GlobalSumPooling1D,",
           "Conv1D, LSTM, GRU, Bidirectional(LSTM/GRU), SimpleRNN,",
-          "UnitNormalization, ZeroPadding1D, MultiHeadAttention,",
-          "Dropout, Flatten, Reshape, Activation, Softmax."
+          "UnitNormalization, ZeroPadding1D, Embedding, TimeDistributed(Dense),",
+          "MultiHeadAttention, Dropout, Flatten, Reshape, Activation, Softmax."
         ),
         "i" = "Please file an issue: {.url https://github.com/davidrsch/orbital/issues/14}"
       ))
@@ -2648,13 +3598,16 @@ orbital_keras_impl <- function(
           "rmsnormalization|prelu|leakyrelu|\\belu\\b|globalaveragepool|",
           "globalmaxpool|averagepooling1d|maxpooling1d|globalsumpooling|",
           "\\brelu\\b|\\bactivation\\b|\\bsoftmax\\b|\\blstm\\b|\\bgru\\b|conv1d|",
-          "bidirectional|simplernn|unitnorm|zeropadding1d|multiheadattention"
+          "bidirectional|simplernn|unitnorm|zeropadding1d|multiheadattention|",
+          "\\bmultiply\\b|\\baverage\\b|\\bmaximum\\b|\\bminimum\\b|\\bdot\\b|",
+          "permute|cropping1d|repeatvector|conv1dtranspose|\\battention\\b|",
+          "depthwiseconv1d|separableconv1d|\\bembedding\\b|timedistributed"
         ),
         cls,
         perl = TRUE
       ) &&
         !grepl(
-          "dense|input|flatten|reshape|dropout|depthwise|separable|2d|3d",
+          "dense|input|flatten|reshape|dropout|depthwiseconv2d|separableconv2d|2d|3d",
           cls
         )
     },

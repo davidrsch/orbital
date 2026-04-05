@@ -2859,3 +2859,639 @@ test_that("keras3 MultiHeadAttention (self-attention) predictions match keras3 p
   preds_keras <- as.numeric(model$predict(x_3d, verbose = 0L))
   expect_equal(preds_orb, preds_keras, tolerance = 1e-4)
 })
+
+# ── Merge layers: Multiply, Average, Maximum, Minimum, Dot ───────────────────
+
+.keras_skip <- function() {
+  skip_if_not_installed("keras3")
+  skip_if_not_installed("reticulate")
+  skip_if_not(
+    reticulate::py_available(initialize = FALSE),
+    "Python not available"
+  )
+}
+
+test_that("keras3 Multiply merge layer predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(4L))
+  a <- k$layers$Dense(4L)(inp)
+  b <- k$layers$Dense(4L)(inp)
+  x <- k$layers$Multiply()(list(a, b))
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+  model$fit(x_mat, rnorm(10), epochs = 2L, verbose = 0L)
+
+  df <- as.data.frame(x_mat)
+  names(df) <- paste0("x", 1:4)
+  orb_obj <- orbital(
+    model,
+    mode = "regression",
+    feature_names = paste0("x", 1:4)
+  )
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_mat, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+test_that("keras3 Average merge layer predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(4L))
+  a <- k$layers$Dense(4L)(inp)
+  b <- k$layers$Dense(4L)(inp)
+  x <- k$layers$Average()(list(a, b))
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+  model$fit(x_mat, rnorm(10), epochs = 2L, verbose = 0L)
+
+  df <- as.data.frame(x_mat)
+  names(df) <- paste0("x", 1:4)
+  orb_obj <- orbital(
+    model,
+    mode = "regression",
+    feature_names = paste0("x", 1:4)
+  )
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_mat, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+test_that("keras3 Maximum merge layer predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(4L))
+  a <- k$layers$Dense(4L)(inp)
+  b <- k$layers$Dense(4L)(inp)
+  x <- k$layers$Maximum()(list(a, b))
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+  model$fit(x_mat, rnorm(10), epochs = 2L, verbose = 0L)
+
+  df <- as.data.frame(x_mat)
+  names(df) <- paste0("x", 1:4)
+  orb_obj <- orbital(
+    model,
+    mode = "regression",
+    feature_names = paste0("x", 1:4)
+  )
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_mat, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+test_that("keras3 Minimum merge layer predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(4L))
+  a <- k$layers$Dense(4L)(inp)
+  b <- k$layers$Dense(4L)(inp)
+  x <- k$layers$Minimum()(list(a, b))
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+  model$fit(x_mat, rnorm(10), epochs = 2L, verbose = 0L)
+
+  df <- as.data.frame(x_mat)
+  names(df) <- paste0("x", 1:4)
+  orb_obj <- orbital(
+    model,
+    mode = "regression",
+    feature_names = paste0("x", 1:4)
+  )
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_mat, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+test_that("keras3 Dot merge layer predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(4L))
+  a <- k$layers$Dense(4L)(inp)
+  b <- k$layers$Dense(4L)(inp)
+  # axes = -1L means dot product over last axis
+  x <- k$layers$Dot(axes = -1L)(list(a, b))
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+  model$fit(x_mat, rnorm(10), epochs = 2L, verbose = 0L)
+
+  df <- as.data.frame(x_mat)
+  names(df) <- paste0("x", 1:4)
+  orb_obj <- orbital(
+    model,
+    mode = "regression",
+    feature_names = paste0("x", 1:4)
+  )
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_mat, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+# ── Permute layer ─────────────────────────────────────────────────────────────
+
+test_that("keras3 Permute (transpose) layer predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  T_len <- 3L
+  C_in <- 2L
+  inp <- k$Input(shape = list(T_len, C_in))
+  # Permute (2, 1) swaps time and channel axes -> output shape (C_in, T_len)
+  x <- k$layers$Permute(dims = list(2L, 1L))(inp)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, rnorm(n_row), epochs = 2L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_3d, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+# ── Cropping1D and RepeatVector ───────────────────────────────────────────────
+
+test_that("keras3 Cropping1D predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  T_len <- 6L
+  C_in <- 2L
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$Cropping1D(cropping = list(1L, 1L))(inp) # removes 1 step each end
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, rnorm(n_row), epochs = 2L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_3d, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+test_that("keras3 RepeatVector predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  n_feat <- 3L
+  n_rep <- 4L
+  inp <- k$Input(shape = list(n_feat))
+  x <- k$layers$Dense(n_feat)(inp)
+  x <- k$layers$RepeatVector(n_rep)(x) # (batch, n_rep, n_feat)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  x_mat <- matrix(rnorm(30), nrow = 10, ncol = n_feat)
+  model$fit(x_mat, rnorm(10), epochs = 2L, verbose = 0L)
+
+  df <- as.data.frame(x_mat)
+  names(df) <- paste0("x", 1:n_feat)
+  orb_obj <- orbital(
+    model,
+    mode = "regression",
+    feature_names = paste0("x", 1:n_feat)
+  )
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_mat, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+# ── Conv1DTranspose ───────────────────────────────────────────────────────────
+
+test_that("keras3 Conv1DTranspose (valid padding) predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  T_len <- 3L
+  C_in <- 2L
+  filters <- 3L
+  ksize <- 2L
+
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$Conv1DTranspose(filters, ksize, padding = "valid")(inp)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, rnorm(n_row), epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_3d, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+# ── Attention ─────────────────────────────────────────────────────────────────
+
+test_that("keras3 Attention (self-attention) predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  T_len <- 4L
+  C_in <- 3L
+
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$Attention(use_scale = FALSE)(list(inp, inp))
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, rnorm(n_row), epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_3d, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+# ── DepthwiseConv1D and SeparableConv1D ───────────────────────────────────────
+
+test_that("keras3 DepthwiseConv1D predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  T_len <- 5L
+  C_in <- 3L
+  depth_mult <- 2L
+  ksize <- 3L
+
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$DepthwiseConv1D(
+    kernel_size = ksize,
+    depth_multiplier = depth_mult,
+    padding = "valid"
+  )(inp)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, rnorm(n_row), epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_3d, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+test_that("keras3 SeparableConv1D predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  T_len <- 5L
+  C_in <- 3L
+  filters <- 4L
+  ksize <- 3L
+
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$SeparableConv1D(
+    filters = filters,
+    kernel_size = ksize,
+    padding = "valid"
+  )(inp)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, rnorm(n_row), epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_3d, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+# ── Embedding ─────────────────────────────────────────────────────────────────
+
+test_that("keras3 Embedding layer predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  vocab_size <- 10L
+  embed_dim <- 4L
+  T_len <- 3L
+
+  inp <- k$Input(shape = list(T_len), dtype = "int32")
+  x <- k$layers$Embedding(vocab_size, embed_dim)(inp)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 20L
+  x_int <- matrix(
+    sample(0L:(vocab_size - 1L), n_row * T_len, replace = TRUE),
+    nrow = n_row,
+    ncol = T_len
+  )
+  model$fit(x_int, rnorm(n_row), epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("tok", seq_len(T_len))
+  df <- as.data.frame(x_int)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_int, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+# ── TimeDistributed ───────────────────────────────────────────────────────────
+
+test_that("keras3 TimeDistributed(Dense) predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  T_len <- 4L
+  C_in <- 3L
+  units <- 5L
+
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$TimeDistributed(k$layers$Dense(units, activation = "relu"))(inp)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, rnorm(n_row), epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_3d, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+# ── E2: coverage gap tests ────────────────────────────────────────────────────
+
+test_that("keras3 ReLU(negative_slope=0.3) predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(4L))
+  x <- k$layers$Dense(6L)(inp)
+  x <- k$layers$ReLU(negative_slope = 0.3)(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+  y_vec <- rnorm(10)
+  model$fit(x_mat, y_vec, epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", 1:4)
+  df <- as.data.frame(x_mat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  preds_orb <- predict(orb_obj, df)$.pred
+  preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+  expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
+test_that("keras3 Bidirectional(LSTM, mul) predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  T_len <- 3L
+  C_in <- 2L
+  H <- 3L
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$Bidirectional(
+    k$layers$LSTM(H, return_sequences = FALSE),
+    merge_mode = "mul"
+  )(inp)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, rnorm(n_row), epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_3d, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+test_that("keras3 stateful LSTM raises cli_abort", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(3L, 2L))
+  x <- k$layers$LSTM(4L, stateful = TRUE)(inp)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  feature_names <- paste0("x", 1:6)
+  expect_error(
+    orbital(model, mode = "regression", feature_names = feature_names),
+    "stateful"
+  )
+})
+
+test_that("keras3 stateful GRU raises cli_abort", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(3L, 2L))
+  x <- k$layers$GRU(4L, stateful = TRUE)(inp)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  feature_names <- paste0("x", 1:6)
+  expect_error(
+    orbital(model, mode = "regression", feature_names = feature_names),
+    "stateful"
+  )
+})
+
+test_that("keras3 UnitNormalization(axis=0) raises cli_abort", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(4L))
+  x <- k$layers$Dense(4L)(inp)
+  x <- k$layers$UnitNormalization(axis = 0L)(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  feature_names <- paste0("x", 1:4)
+  expect_error(
+    orbital(model, mode = "regression", feature_names = feature_names),
+    "axis"
+  )
+})
+
+test_that("keras3 AveragePooling1D(padding='same') predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  T_len <- 5L
+  C_in <- 2L
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$AveragePooling1D(
+    pool_size = 3L,
+    strides = 2L,
+    padding = "same"
+  )(inp)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, rnorm(n_row), epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_3d, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
