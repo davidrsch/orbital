@@ -677,6 +677,29 @@ orbital_keras_dag_impl <- function(
       )
       all_exprs[[lname]] <- stats::setNames(min_exprs, min_names)
       assign(lname, min_names, envir = expr_reg)
+    } else if (grepl("\\bsubtract\\b", cls, perl = TRUE)) {
+      # Element-wise Subtract: first_input - second_input
+      inbound <- topo_map[[lname]]
+      if (is.null(inbound) || length(inbound) != 2L) {
+        cli::cli_abort(
+          "Keras Subtract layer {.val {lname}} requires exactly 2 inbound inputs, got {length(inbound)}."
+        )
+      }
+      exprs_a <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      exprs_b <- get(inbound[2L], envir = expr_reg, inherits = FALSE)
+      if (length(exprs_a) != length(exprs_b)) {
+        cli::cli_abort(
+          "Keras Subtract layer {.val {lname}}: both inputs must have the same width (got: {length(exprs_a)} vs {length(exprs_b)})."
+        )
+      }
+      sub_names <- paste0("orbital_", lname, "_h", seq_len(length(exprs_a)))
+      sub_exprs <- vapply(
+        seq_along(exprs_a),
+        function(i) paste0(backtick(exprs_a[i]), " - ", backtick(exprs_b[i])),
+        character(1L)
+      )
+      all_exprs[[lname]] <- stats::setNames(sub_exprs, sub_names)
+      assign(lname, sub_names, envir = expr_reg)
     } else if (grepl("\\bdot\\b", cls, perl = TRUE)) {
       # Dot product: sum of element-wise products of exactly 2 inputs (axes=-1)
       inbound <- topo_map[[lname]]
@@ -1248,6 +1271,50 @@ orbital_keras_dag_impl <- function(
       }
       all_exprs[[lname]] <- stats::setNames(pool_exprs, pool_nms)
       assign(lname, pool_nms, envir = expr_reg)
+    } else if (grepl("upsampling1d", cls)) {
+      # UpSampling1D: repeat each time-step `size` times.
+      # Input layout: time-step major (T_in × C_feat).
+      # Output: T_out = T_in * size timesteps, same C_feat channels.
+      if (grepl("2d|3d", cls)) {
+        cli::cli_abort(
+          "UpSampling2D/3D is not supported by orbital (requires spatial replication)."
+        )
+      }
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      n_f <- length(in_exprs)
+      size <- tryCatch(
+        as.integer(l$get_config()$size),
+        error = function(e) NA_integer_
+      )
+      if (is.na(size) || size < 1L) {
+        size <- 2L
+      }
+      in_shape <- tryCatch(
+        as.integer(unlist(l$input_shape)),
+        error = function(e) NULL
+      )
+      C_feat <- if (!is.null(in_shape) && length(in_shape) >= 1L) {
+        tail(in_shape[!is.na(in_shape)], 1L)
+      } else {
+        1L
+      }
+      T_in <- as.integer(n_f / C_feat)
+      T_out <- T_in * size
+      up_nms <- character(T_out * C_feat)
+      up_exprs <- character(T_out * C_feat)
+      idx <- 1L
+      for (p in seq_len(T_out) - 1L) {
+        t_src <- p %/% size
+        for (c in seq_len(C_feat)) {
+          src_idx <- t_src * C_feat + c
+          up_nms[[idx]] <- paste0("orbital_up1d_", lname, "_", idx)
+          up_exprs[[idx]] <- backtick(in_exprs[[src_idx]])
+          idx <- idx + 1L
+        }
+      }
+      all_exprs[[lname]] <- stats::setNames(up_exprs, up_nms)
+      assign(lname, up_nms, envir = expr_reg)
     } else if (grepl("globalsumpooling", cls)) {
       # GlobalSumPooling1D: row-wise sum of all feature columns.
       # NOTE: GlobalSumPooling1D is not a standard Keras 3 layer; it exists
@@ -2963,6 +3030,203 @@ orbital_keras_dag_impl <- function(
         }
       }
       assign(lname, att_out_nms, envir = expr_reg)
+    } else if (grepl("additiveattention", cls)) {
+      # AdditiveAttention (Bahdanau attention):
+      # score[q,k] = scale * sum_d tanh(query[q,d] + key[k,d])
+      # where scale is 1.0 if use_scale=FALSE (the Keras default).
+      # Softmax and output weighted-sum are identical to Attention.
+      inbound <- topo_map[[lname]]
+      if (is.null(inbound) || length(inbound) < 2L) {
+        cli::cli_abort(
+          "Keras AdditiveAttention layer {.val {lname}} requires at least 2 inbound inputs (query, value)."
+        )
+      }
+      q_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      v_exprs <- get(inbound[2L], envir = expr_reg, inherits = FALSE)
+      k_exprs <- if (length(inbound) >= 3L) {
+        get(inbound[3L], envir = expr_reg, inherits = FALSE)
+      } else {
+        v_exprs
+      }
+
+      cfg_aa <- tryCatch(l$get_config(), error = function(e) list())
+      use_scale_aa <- tryCatch(
+        as.logical(cfg_aa$use_scale),
+        error = function(e) FALSE
+      )
+      aa_scale <- if (isTRUE(use_scale_aa)) {
+        wts_aa <- tryCatch(l$get_weights(), error = function(e) list())
+        if (length(wts_aa) >= 1L) as.numeric(wts_aa[[1L]])[1L] else 1.0
+      } else {
+        1.0
+      }
+
+      in_shape_q_aa <- tryCatch(
+        as.integer(unlist(l$input_spec[[1L]]$shape)),
+        error = function(e) NULL
+      )
+      in_shape_v_aa <- tryCatch(
+        as.integer(unlist(l$input_spec[[2L]]$shape)),
+        error = function(e) NULL
+      )
+      D_q_aa <- if (!is.null(in_shape_q_aa) && length(in_shape_q_aa) >= 1L) {
+        tail(in_shape_q_aa[!is.na(in_shape_q_aa)], 1L)
+      } else {
+        as.integer(sqrt(length(q_exprs)))
+      }
+      T_q_aa <- as.integer(length(q_exprs) / D_q_aa)
+      D_v_aa <- if (!is.null(in_shape_v_aa) && length(in_shape_v_aa) >= 1L) {
+        tail(in_shape_v_aa[!is.na(in_shape_v_aa)], 1L)
+      } else {
+        D_q_aa
+      }
+      T_v_aa <- as.integer(length(v_exprs) / D_v_aa)
+      T_k_aa <- as.integer(length(k_exprs) / D_q_aa)
+
+      att_out_exprs_aa <- character(0L)
+      att_out_nms_aa <- character(0L)
+
+      # Scores: sum_d tanh(q[d] + k[d]) * scale
+      score_nms_aa <- matrix(
+        paste0(
+          "orbital_addatt_",
+          lname,
+          "_sc_q",
+          rep(seq_len(T_q_aa), each = T_k_aa),
+          "_k",
+          rep(seq_len(T_k_aa), T_q_aa)
+        ),
+        nrow = T_q_aa,
+        ncol = T_k_aa
+      )
+      score_exprs_aa <- matrix("", nrow = T_q_aa, ncol = T_k_aa)
+      for (q_i in seq_len(T_q_aa)) {
+        for (k_j in seq_len(T_k_aa)) {
+          terms <- vapply(
+            seq_len(D_q_aa),
+            function(d) {
+              paste0(
+                "tanh(",
+                backtick(q_exprs[(q_i - 1L) * D_q_aa + d]),
+                " + ",
+                backtick(k_exprs[(k_j - 1L) * D_q_aa + d]),
+                ")"
+              )
+            },
+            character(1L)
+          )
+          score_exprs_aa[q_i, k_j] <- paste0(
+            "(",
+            aa_scale,
+            " * (",
+            paste(terms, collapse = " + "),
+            "))"
+          )
+        }
+      }
+
+      # Softmax + weighted output (identical structure to Attention)
+      for (q_i in seq_len(T_q_aa)) {
+        sc_names_aa <- score_nms_aa[q_i, ]
+        sc_expr_q_aa <- score_exprs_aa[q_i, ]
+        for (k_j in seq_len(T_k_aa)) {
+          all_exprs[[lname]] <- c(
+            all_exprs[[lname]],
+            stats::setNames(sc_expr_q_aa[k_j], sc_names_aa[k_j])
+          )
+        }
+        max_nm_aa <- paste0("orbital_addatt_", lname, "_max_q", q_i)
+        max_expr_aa <- paste0(
+          "pmax(",
+          paste(backtick(sc_names_aa), collapse = ", "),
+          ")"
+        )
+        all_exprs[[lname]] <- c(
+          all_exprs[[lname]],
+          stats::setNames(max_expr_aa, max_nm_aa)
+        )
+        exp_nms_aa <- paste0(
+          "orbital_addatt_",
+          lname,
+          "_exp_q",
+          q_i,
+          "_k",
+          seq_len(T_k_aa)
+        )
+        exp_exprs_aa <- vapply(
+          sc_names_aa,
+          function(s) {
+            paste0("exp(", backtick(s), " - ", backtick(max_nm_aa), ")")
+          },
+          character(1L)
+        )
+        for (k_j in seq_len(T_k_aa)) {
+          all_exprs[[lname]] <- c(
+            all_exprs[[lname]],
+            stats::setNames(exp_exprs_aa[k_j], exp_nms_aa[k_j])
+          )
+        }
+        sum_nm_aa <- paste0("orbital_addatt_", lname, "_sum_q", q_i)
+        sum_expr_aa <- paste0(
+          "(",
+          paste(backtick(exp_nms_aa), collapse = " + "),
+          ")"
+        )
+        all_exprs[[lname]] <- c(
+          all_exprs[[lname]],
+          stats::setNames(sum_expr_aa, sum_nm_aa)
+        )
+        attn_nms_aa <- paste0(
+          "orbital_addatt_",
+          lname,
+          "_attn_q",
+          q_i,
+          "_k",
+          seq_len(T_k_aa)
+        )
+        attn_exprs_aa <- vapply(
+          exp_nms_aa,
+          function(e) paste0("(", backtick(e), " / ", backtick(sum_nm_aa), ")"),
+          character(1L)
+        )
+        for (k_j in seq_len(T_k_aa)) {
+          all_exprs[[lname]] <- c(
+            all_exprs[[lname]],
+            stats::setNames(attn_exprs_aa[k_j], attn_nms_aa[k_j])
+          )
+        }
+        for (d_v in seq_len(D_v_aa)) {
+          terms <- vapply(
+            seq_len(T_v_aa),
+            function(k_j) {
+              paste0(
+                "(",
+                backtick(attn_nms_aa[k_j]),
+                " * ",
+                backtick(v_exprs[(k_j - 1L) * D_v_aa + d_v]),
+                ")"
+              )
+            },
+            character(1L)
+          )
+          out_expr_aa <- paste0("(", paste(terms, collapse = " + "), ")")
+          out_nm_aa <- paste0(
+            "orbital_addatt_",
+            lname,
+            "_out_q",
+            q_i,
+            "_d",
+            d_v
+          )
+          att_out_exprs_aa <- c(att_out_exprs_aa, out_expr_aa)
+          att_out_nms_aa <- c(att_out_nms_aa, out_nm_aa)
+          all_exprs[[lname]] <- c(
+            all_exprs[[lname]],
+            stats::setNames(out_expr_aa, out_nm_aa)
+          )
+        }
+      }
+      assign(lname, att_out_nms_aa, envir = expr_reg)
     } else if (grepl("timedistributed", cls)) {
       # TimeDistributed: apply a layer independently to each timestep.
       # Supports Dense inner layer; other inner types raise cli_abort.
@@ -3061,6 +3325,17 @@ orbital_keras_dag_impl <- function(
       emb_mat <- wts[[1L]] # (vocab_size, embed_dim)
       vocab_size <- dim(emb_mat)[1L]
       embed_dim <- dim(emb_mat)[2L]
+
+      if (vocab_size > 50000L) {
+        cli::cli_abort(c(
+          "Keras Embedding layer {.val {lname}}: vocabulary size {vocab_size} exceeds the",
+          " maximum supported limit of 50,000.",
+          "x" = "Expanding this layer would generate >50,000 CASE WHEN branches per output column,",
+          "     which most SQL engines cannot compile or execute.",
+          "i" = "Consider replacing the Embedding layer with a pre-computed lookup table and",
+          "     joining the index column against it inside the database instead."
+        ))
+      }
 
       if (vocab_size > 10000L) {
         cli::cli_warn(c(
@@ -3521,7 +3796,8 @@ orbital_keras_dag_impl <- function(
           "AveragePooling1D, MaxPooling1D, GlobalSumPooling1D,",
           "Conv1D, LSTM, GRU, Bidirectional(LSTM/GRU), SimpleRNN,",
           "UnitNormalization, ZeroPadding1D, Embedding, TimeDistributed(Dense),",
-          "MultiHeadAttention, Dropout, Flatten, Reshape, Activation, Softmax."
+          "MultiHeadAttention, Attention, AdditiveAttention, Subtract,",
+          "UpSampling1D, Dropout, Flatten, Reshape, Activation, Softmax."
         ),
         "i" = "Please file an issue: {.url https://github.com/davidrsch/orbital/issues/14}"
       ))
@@ -3599,9 +3875,9 @@ orbital_keras_impl <- function(
           "globalmaxpool|averagepooling1d|maxpooling1d|globalsumpooling|",
           "\\brelu\\b|\\bactivation\\b|\\bsoftmax\\b|\\blstm\\b|\\bgru\\b|conv1d|",
           "bidirectional|simplernn|unitnorm|zeropadding1d|multiheadattention|",
-          "\\bmultiply\\b|\\baverage\\b|\\bmaximum\\b|\\bminimum\\b|\\bdot\\b|",
-          "permute|cropping1d|repeatvector|conv1dtranspose|\\battention\\b|",
-          "depthwiseconv1d|separableconv1d|\\bembedding\\b|timedistributed"
+          "\\bmultiply\\b|\\baverage\\b|\\bmaximum\\b|\\bminimum\\b|\\bdot\\b|\\bsubtract\\b|",
+          "permute|cropping1d|repeatvector|conv1dtranspose|\\battention\\b|additiveattention|",
+          "depthwiseconv1d|separableconv1d|\\bembedding\\b|timedistributed|upsampling1d"
         ),
         cls,
         perl = TRUE

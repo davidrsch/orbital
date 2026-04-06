@@ -3576,3 +3576,102 @@ test_that("keras3 Functional multi-output: two classification heads produce name
     tolerance = 1e-6
   )
 })
+
+# ── Subtract merge layer ──────────────────────────────────────────────────────
+
+test_that("keras3 Subtract merge layer predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(4L))
+  a <- k$layers$Dense(4L)(inp)
+  b <- k$layers$Dense(4L)(inp)
+  x <- k$layers$Subtract()(list(a, b))
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+  model$fit(x_mat, rnorm(10), epochs = 2L, verbose = 0L)
+
+  df <- as.data.frame(x_mat)
+  names(df) <- paste0("x", 1:4)
+  orb_obj <- orbital(
+    model,
+    mode = "regression",
+    feature_names = paste0("x", 1:4)
+  )
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_mat, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+# ── UpSampling1D layer ────────────────────────────────────────────────────────
+
+test_that("keras3 UpSampling1D predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  T_len <- 3L
+  C_in <- 2L
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$UpSampling1D(size = 2L)(inp)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  x_arr <- array(rnorm(10 * T_len * C_in), dim = c(10L, T_len, C_in))
+  model$fit(x_arr, rnorm(10), epochs = 2L, verbose = 0L)
+
+  x_flat <- matrix(x_arr, nrow = 10, ncol = T_len * C_in)
+  df <- as.data.frame(x_flat)
+  names(df) <- paste0("x", seq_len(T_len * C_in))
+  orb_obj <- orbital(
+    model,
+    mode = "regression",
+    feature_names = names(df)
+  )
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_arr, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
+
+# ── AdditiveAttention layer ───────────────────────────────────────────────────
+
+test_that("keras3 AdditiveAttention (Bahdanau) predictions match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  T_len <- 2L
+  C_in <- 3L
+  inp <- k$Input(shape = list(T_len, C_in))
+  q <- k$layers$Dense(C_in)(inp)
+  v <- k$layers$Dense(C_in)(inp)
+  x <- k$layers$AdditiveAttention(use_scale = FALSE)(list(q, v))
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  x_arr <- array(rnorm(10 * T_len * C_in), dim = c(10L, T_len, C_in))
+  model$fit(x_arr, rnorm(10), epochs = 2L, verbose = 0L)
+
+  x_flat <- matrix(x_arr, nrow = 10, ncol = T_len * C_in)
+  df <- as.data.frame(x_flat)
+  names(df) <- paste0("x", seq_len(T_len * C_in))
+  orb_obj <- orbital(
+    model,
+    mode = "regression",
+    feature_names = names(df)
+  )
+  expect_equal(
+    predict(orb_obj, df)$.pred,
+    as.numeric(model$predict(x_arr, verbose = 0L)),
+    tolerance = 1e-4
+  )
+})
