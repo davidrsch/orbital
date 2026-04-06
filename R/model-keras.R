@@ -1116,6 +1116,64 @@ orbital_keras_dag_impl <- function(
       )
       all_exprs[[lname]] <- stats::setNames(gmp_expr, gmp_nm)
       assign(lname, gmp_nm, envir = expr_reg)
+    } else if (grepl("adaptiveaveragepooling1d", cls)) {
+      # AdaptiveAveragePooling1D: adaptive-window mean.
+      # For output size O and input length T_in, output position i (0-indexed):
+      #   start = floor(i * T_in / O), end = ceiling((i+1) * T_in / O)
+      #   output = mean over that window.
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      n_f <- length(in_exprs)
+      o_size <- tryCatch(
+        as.integer(l$get_config()$output_size),
+        error = function(e) NA_integer_
+      )
+      if (is.na(o_size) || o_size < 1L) {
+        cli::cli_abort(
+          "AdaptiveAveragePooling1D: invalid output_size {.val {o_size}}."
+        )
+      }
+      in_shape <- tryCatch(
+        as.integer(unlist(l$input_shape)),
+        error = function(e) NULL
+      )
+      C_feat <- if (!is.null(in_shape) && length(in_shape) >= 1L) {
+        tail(in_shape[!is.na(in_shape)], 1L)
+      } else {
+        1L
+      }
+      T_in <- as.integer(n_f / C_feat)
+      if (T_in < o_size) {
+        cli::cli_abort(
+          "AdaptiveAveragePooling1D: output_size ({o_size}) must not exceed input length ({T_in})."
+        )
+      }
+      pool_nms <- character(0L)
+      pool_exprs <- character(0L)
+      idx <- 1L
+      for (i in seq_len(o_size) - 1L) {
+        start_t <- as.integer(floor(i * T_in / o_size))
+        end_t <- as.integer(ceiling((i + 1L) * T_in / o_size))
+        for (c in seq_len(C_feat)) {
+          cols_bt <- vapply(
+            seq(start_t, end_t - 1L),
+            function(t) backtick(in_exprs[[t * C_feat + c]]),
+            character(1L)
+          )
+          n_win <- length(cols_bt)
+          nm <- paste0("orbital_adaptiveavgpool1d_", lname, "_", idx)
+          pool_exprs[[idx]] <- paste0(
+            "(",
+            paste(cols_bt, collapse = " + "),
+            ") / ",
+            n_win
+          )
+          pool_nms[[idx]] <- nm
+          idx <- idx + 1L
+        }
+      }
+      all_exprs[[lname]] <- stats::setNames(pool_exprs, pool_nms)
+      assign(lname, pool_nms, envir = expr_reg)
     } else if (grepl("averagepooling1d", cls)) {
       # AveragePooling1D: sliding-window mean across time steps.
       # Input layout: time-step major (T_in × C_feat) — in_exprs[(t-1)*C_feat + c]
@@ -1188,6 +1246,60 @@ orbital_keras_dag_impl <- function(
           } else {
             "0"
           }
+          pool_nms[[idx]] <- nm
+          idx <- idx + 1L
+        }
+      }
+      all_exprs[[lname]] <- stats::setNames(pool_exprs, pool_nms)
+      assign(lname, pool_nms, envir = expr_reg)
+    } else if (grepl("adaptivemaxpooling1d", cls)) {
+      # AdaptiveMaxPooling1D: adaptive-window max.
+      # Same window formula as AdaptiveAveragePooling1D, max instead of mean.
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      n_f <- length(in_exprs)
+      o_size <- tryCatch(
+        as.integer(l$get_config()$output_size),
+        error = function(e) NA_integer_
+      )
+      if (is.na(o_size) || o_size < 1L) {
+        cli::cli_abort(
+          "AdaptiveMaxPooling1D: invalid output_size {.val {o_size}}."
+        )
+      }
+      in_shape <- tryCatch(
+        as.integer(unlist(l$input_shape)),
+        error = function(e) NULL
+      )
+      C_feat <- if (!is.null(in_shape) && length(in_shape) >= 1L) {
+        tail(in_shape[!is.na(in_shape)], 1L)
+      } else {
+        1L
+      }
+      T_in <- as.integer(n_f / C_feat)
+      if (T_in < o_size) {
+        cli::cli_abort(
+          "AdaptiveMaxPooling1D: output_size ({o_size}) must not exceed input length ({T_in})."
+        )
+      }
+      pool_nms <- character(0L)
+      pool_exprs <- character(0L)
+      idx <- 1L
+      for (i in seq_len(o_size) - 1L) {
+        start_t <- as.integer(floor(i * T_in / o_size))
+        end_t <- as.integer(ceiling((i + 1L) * T_in / o_size))
+        for (c in seq_len(C_feat)) {
+          cols_bt <- vapply(
+            seq(start_t, end_t - 1L),
+            function(t) backtick(in_exprs[[t * C_feat + c]]),
+            character(1L)
+          )
+          nm <- paste0("orbital_adaptivemaxpool1d_", lname, "_", idx)
+          pool_exprs[[idx]] <- paste0(
+            "do.call(pmax, list(",
+            paste(cols_bt, collapse = ", "),
+            "))"
+          )
           pool_nms[[idx]] <- nm
           idx <- idx + 1L
         }
@@ -3793,11 +3905,13 @@ orbital_keras_dag_impl <- function(
           "orbital supports: Dense, Add, Concatenate, BatchNormalization,",
           "LayerNormalization, InstanceNormalization, GroupNormalization,",
           "RMSNormalization, PReLU, GlobalAveragePooling1D, GlobalMaxPooling1D,",
+          "AdaptiveAveragePooling1D, AdaptiveMaxPooling1D,",
           "AveragePooling1D, MaxPooling1D, GlobalSumPooling1D,",
           "Conv1D, LSTM, GRU, Bidirectional(LSTM/GRU), SimpleRNN,",
           "UnitNormalization, ZeroPadding1D, Embedding, TimeDistributed(Dense),",
           "MultiHeadAttention, Attention, AdditiveAttention, Subtract,",
-          "UpSampling1D, Dropout, Flatten, Reshape, Activation, Softmax."
+          "UpSampling1D, Dropout, SpatialDropout1D, GaussianDropout,",
+          "AlphaDropout, Flatten, Reshape, Activation, Softmax."
         ),
         "i" = "Please file an issue: {.url https://github.com/davidrsch/orbital/issues/14}"
       ))
@@ -3872,7 +3986,7 @@ orbital_keras_impl <- function(
         paste0(
           "\\badd\\b|concatenate|batchnorm|layernorm|instancenorm|groupnorm|",
           "rmsnormalization|prelu|leakyrelu|\\belu\\b|globalaveragepool|",
-          "globalmaxpool|averagepooling1d|maxpooling1d|globalsumpooling|",
+          "globalmaxpool|adaptiveaveragepooling1d|adaptivemaxpooling1d|averagepooling1d|maxpooling1d|globalsumpooling|",
           "\\brelu\\b|\\bactivation\\b|\\bsoftmax\\b|\\blstm\\b|\\bgru\\b|conv1d|",
           "bidirectional|simplernn|unitnorm|zeropadding1d|multiheadattention|",
           "\\bmultiply\\b|\\baverage\\b|\\bmaximum\\b|\\bminimum\\b|\\bdot\\b|\\bsubtract\\b|",
