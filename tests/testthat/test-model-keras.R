@@ -3927,3 +3927,47 @@ test_that("keras3 EinsumDense (ab,bc->ac) predictions match keras3 predict", {
   preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
   expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
 })
+test_that("keras3 GroupedQueryAttention (GQA) predictions match keras3 predict", {
+  skip_if_not_installed("keras3")
+  skip_if_not_installed("reticulate")
+  skip_if_not(
+    reticulate::py_available(initialize = FALSE),
+    "Python not available"
+  )
+  k <- reticulate::import("keras")
+  T_len <- 3L
+  C_in <- 8L
+  num_heads <- 4L
+  num_query_groups <- 2L
+  head_dim <- 4L
+
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$GroupedQueryAttention(
+    head_dim = head_dim,
+    num_heads = num_heads,
+    num_query_groups = num_query_groups
+  )(inp, inp)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  y_vec <- rnorm(n_row)
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, y_vec, epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  preds_orb <- predict(orb_obj, df)$.pred
+  preds_keras <- as.numeric(model$predict(x_3d, verbose = 0L))
+  expect_equal(preds_orb, preds_keras, tolerance = 1e-4)
+})
