@@ -28,6 +28,27 @@ orbital.model_fit <- function(
           separate_trees = separate_trees,
           prefix = prefix
         )
+      } else if (
+        is.list(x$fit) &&
+          !is.null(x$fit$fit) &&
+          any(grepl("^keras\\.src", class(x$fit$fit)))
+      ) {
+        # kerasnip model: fit slot is list(fit = keras_model, history, lvl, ...)
+        # Extract feature names from the parsnip formula preprocessing terms
+        kn_feature_names <- if (!is.null(x$preproc$terms)) {
+          attr(x$preproc$terms, "term.labels")
+        } else {
+          NULL
+        }
+        rlang::exec(
+          orbital,
+          x$fit$fit,
+          mode = mode,
+          type = type,
+          lvl = x$lvl,
+          feature_names = kn_feature_names,
+          prefix = prefix
+        )
       } else {
         rlang::exec(
           orbital,

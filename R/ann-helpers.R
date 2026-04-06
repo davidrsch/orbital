@@ -1,5 +1,6 @@
 # Helper functions for artificial neural network (MLP) model implementations
-# Used by model-nnet.R, model-brulee.R, model-keras.R, model-h2o.R, model-kerasnip.R
+# Used by model-nnet.R, model-brulee.R, model-keras.R, model-h2o.R
+# kerasnip dispatch (unwrapping list fit slot) is handled in parsnip.R
 
 # Build an inline dplyr/SQL-portable expression string for erf(z_expr).
 # Uses the Abramowitz & Stegun (1964) §7.1.28 polynomial approximation;

@@ -3495,3 +3495,84 @@ test_that("keras3 AveragePooling1D(padding='same') predictions match keras3 pred
     tolerance = 1e-4
   )
 })
+
+# ── multi-output Functional API: classification (R#32) ────────────────────────
+
+test_that("keras3 Functional binary classifier predictions numerically match keras3 predict", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(4L))
+  x <- k$layers$Dense(8L, activation = "relu")(inp)
+  out <- k$layers$Dense(1L, activation = "sigmoid")(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "binary_crossentropy")
+
+  set.seed(42)
+  x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+  y_vec <- as.integer(rnorm(10) > 0)
+  model$fit(x_mat, y_vec, epochs = 5L, verbose = 0L)
+
+  feature_names <- paste0("x", 1:4)
+  df <- as.data.frame(x_mat)
+  names(df) <- feature_names
+  orb_obj <- orbital(
+    model,
+    mode = "classification",
+    type = "prob",
+    lvl = c("0", "1"),
+    feature_names = feature_names
+  )
+  preds_orb <- predict(orb_obj, df)
+  preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+  # keras returns p(class=1); orbital .pred_1 should match
+  expect_equal(preds_orb$.pred_1, preds_keras, tolerance = 1e-5)
+  # probabilities sum to 1
+  expect_equal(
+    preds_orb$.pred_0 + preds_orb$.pred_1,
+    rep(1, 10),
+    tolerance = 1e-6
+  )
+})
+
+test_that("keras3 Functional multi-output: two classification heads produce named prediction columns", {
+  .keras_skip()
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(4L))
+  x <- k$layers$Dense(8L, activation = "relu")(inp)
+  out1 <- k$layers$Dense(1L, name = "head_1")(x)
+  out2 <- k$layers$Dense(1L, name = "head_2")(x)
+  model <- k$Model(inputs = inp, outputs = list(out1, out2))
+  model$compile(
+    optimizer = "adam",
+    loss = list("binary_crossentropy", "binary_crossentropy")
+  )
+
+  set.seed(42)
+  x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+  y1 <- as.integer(rnorm(10) > 0)
+  y2 <- as.integer(rnorm(10) > 0)
+  model$fit(x_mat, list(y1, y2), epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", 1:4)
+  df <- as.data.frame(x_mat)
+  names(df) <- feature_names
+  # Two output heads → orbital treats as 2-class distribution
+  orb_obj <- orbital(
+    model,
+    mode = "classification",
+    type = "prob",
+    lvl = c("head_1", "head_2"),
+    feature_names = feature_names
+  )
+  preds_orb <- predict(orb_obj, df)
+  expect_true(".pred_head_1" %in% names(preds_orb))
+  expect_true(".pred_head_2" %in% names(preds_orb))
+  # Probabilities must be non-negative and sum to 1
+  expect_true(all(preds_orb$.pred_head_1 >= 0))
+  expect_true(all(preds_orb$.pred_head_2 >= 0))
+  expect_equal(
+    preds_orb$.pred_head_1 + preds_orb$.pred_head_2,
+    rep(1, 10),
+    tolerance = 1e-6
+  )
+})
