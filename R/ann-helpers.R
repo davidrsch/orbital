@@ -50,9 +50,14 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
         "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * (exp({x_expr} / {format_numeric(a)}) - 1))"
       )
     },
-    # 1.7580993408473766 = SELU_GAMMA (1.0507009873554805) * SELU_ALPHA (1.6732631921768192)
+    # SELU constants from Klambauer et al. 2017 (https://arxiv.org/abs/1706.02515):
+    #   SELU_ALPHA  = 1.6732632423543772
+    #   SELU_GAMMA  = 1.0507009873554805
+    #   SELU_GAMMA * SELU_ALPHA = 1.7580993408474319
+    # Note: PyTorch uses alpha=1.6732631921768192 (differs by ~5e-8), which is
+    # the value present in the ONNX spec. Keras 3 uses the paper value above.
     "selu" = glue::glue(
-      "dplyr::if_else({x_expr} > 0, 1.0507009873554805 * {x_expr}, 1.7580993408473766 * (exp({x_expr}) - 1))"
+      "dplyr::if_else({x_expr} > 0, 1.0507009873554805 * {x_expr}, 1.7580993408474319 * (exp({x_expr}) - 1))"
     ),
     # Exact GELU (default in Keras3 / PyTorch approximate=False):
     # gelu(x) = x * 0.5 * (1 + erf(x/sqrt(2))) via A&S 7.1.28 polynomial.
@@ -141,6 +146,18 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
         "i" = "The DAG path in orbital handles standalone Activation layers with softmax/log_softmax correctly."
       )
     ),
+    # sparsemax normalises like softmax (projects onto the probability simplex)
+    # and therefore also requires structural/DAG-level handling.
+    "sparsemax" = cli::cli_abort(
+      c(
+        "Activation {.val sparsemax} cannot be applied as a per-unit scalar expression.",
+        "i" = paste(
+          "sparsemax normalises across all units simultaneously",
+          "(projects each row onto the probability simplex).",
+          "It requires structural handling similar to softmax."
+        )
+      )
+    ),
     cli::cli_abort(
       "Activation function {.val {activation}} is not supported by orbital."
     )
@@ -152,24 +169,21 @@ build_mlp_pre_act <- function(weight_mat, biases, input_names) {
   vapply(
     seq_len(n_out),
     function(i) {
-      terms <- format_numeric(biases[i])
-      for (j in seq_along(input_names)) {
-        w <- weight_mat[i, j]
-        if (w == 0) {
-          next
-        }
-        terms <- c(
-          terms,
+      nz_idx <- which(weight_mat[i, ] != 0)
+      wterms <- vapply(
+        nz_idx,
+        function(j) {
           paste0(
             "(",
             backtick(input_names[j]),
             " * ",
-            format_numeric(w),
+            format_numeric(weight_mat[i, j]),
             ")"
           )
-        )
-      }
-      paste(terms, collapse = " + ")
+        },
+        character(1)
+      )
+      paste(c(format_numeric(biases[i]), wterms), collapse = " + ")
     },
     character(1)
   )

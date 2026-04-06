@@ -236,6 +236,13 @@ test_that("activation_expr: log_softmax raises informative error (requires DAG p
   )
 })
 
+test_that("activation_expr: sparsemax raises informative error (requires DAG path)", {
+  expect_error(
+    activation_expr("sparsemax", "z"),
+    regexp = "sparsemax"
+  )
+})
+
 test_that("activation_expr: unknown activation raises an error", {
   expect_error(activation_expr("nonexistent_act_xyz", "z"))
 })
