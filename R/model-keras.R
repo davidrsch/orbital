@@ -156,125 +156,575 @@ orbital_keras_dag_impl <- function(
 
   # State environment: mutable shared state passed to all handlers by reference.
   state <- new.env(parent = emptyenv())
-  state$all_exprs       <- list()
+  state$all_exprs <- list()
   state$out_pre_act_map <- list()
-  state$out_pre_act     <- NULL
+  state$out_pre_act <- NULL
 
   for (l in all_layers) {
     cls_orig <- class(l)[1L]
-    cls      <- tolower(cls_orig)
-    lname    <- l$name
+    cls <- tolower(cls_orig)
+    lname <- l$name
 
     if (grepl("input", cls)) {
       assign(lname, input_names, envir = expr_reg)
     } else if (grepl("einsumdense", cls)) {
-      .k3_einsumdense(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_einsumdense(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("dense", cls)) {
-      .k3_dense(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_dense(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("\\badd\\b", cls, perl = TRUE)) {
-      .k3_add(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_add(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("\\bmultiply\\b", cls, perl = TRUE)) {
-      .k3_multiply(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_multiply(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (
       grepl("\\baverage\\b", cls, perl = TRUE) && !grepl("pool|global", cls)
     ) {
-      .k3_average(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_average(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("\\bmaximum\\b", cls, perl = TRUE)) {
-      .k3_maximum(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_maximum(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("\\bminimum\\b", cls, perl = TRUE)) {
-      .k3_minimum(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_minimum(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("\\bsubtract\\b", cls, perl = TRUE)) {
-      .k3_subtract(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_subtract(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("\\bdot\\b", cls, perl = TRUE)) {
-      .k3_dot(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_dot(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("concatenate", cls)) {
-      .k3_concatenate(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_concatenate(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("batchnorm", cls)) {
-      .k3_batchnorm(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_batchnorm(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("layernorm", cls)) {
-      .k3_layernorm(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_layernorm(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("prelu", cls)) {
-      .k3_prelu(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_prelu(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("dropout|flatten|reshape", cls)) {
-      .k3_dropout_passthru(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_dropout_passthru(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("leakyrelu", cls)) {
-      .k3_leakyrelu(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_leakyrelu(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("\\belu\\b", cls, perl = TRUE)) {
-      .k3_elu(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_elu(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("\\brelu\\b", cls, perl = TRUE)) {
-      .k3_relu(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_relu(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (
       grepl("\\bactivation\\b", cls, perl = TRUE) && !grepl("softmax", cls)
     ) {
-      .k3_activation(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_activation(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("globalaveragepool", cls)) {
-      .k3_globalaveragepool(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_globalaveragepool(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("globalmaxpool", cls)) {
-      .k3_globalmaxpool(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_globalmaxpool(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("adaptiveaveragepooling1d", cls)) {
-      .k3_adaptiveaveragepooling1d(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_adaptiveaveragepooling1d(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("averagepooling1d", cls)) {
-      .k3_averagepooling1d(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_averagepooling1d(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("adaptivemaxpooling1d", cls)) {
-      .k3_adaptivemaxpooling1d(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_adaptivemaxpooling1d(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("maxpooling1d", cls)) {
-      .k3_maxpooling1d(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_maxpooling1d(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("upsampling1d", cls)) {
-      .k3_upsampling1d(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_upsampling1d(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("globalsumpooling", cls)) {
-      .k3_globalsumpooling(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_globalsumpooling(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("instancenorm", cls)) {
-      .k3_instancenorm(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_instancenorm(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("groupnorm", cls)) {
-      .k3_groupnorm(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_groupnorm(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("rmsnormalization", cls)) {
-      .k3_rmsnorm(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_rmsnorm(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("\\bsoftmax\\b", cls, perl = TRUE)) {
-      .k3_softmax(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_softmax(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("conv1dtranspose", cls)) {
-      .k3_conv1dtranspose(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_conv1dtranspose(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("depthwiseconv1d", cls)) {
-      .k3_depthwiseconv1d(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_depthwiseconv1d(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("separableconv1d", cls)) {
-      .k3_separableconv1d(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_separableconv1d(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("convlstm1d", cls)) {
-      .k3_convlstm1d(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_convlstm1d(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (
       grepl("conv1d", cls) && !grepl("depthwise|separable|transpose|2d|3d", cls)
     ) {
-      .k3_conv1d(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_conv1d(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("\\blstm\\b", cls, perl = TRUE)) {
-      .k3_lstm(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_lstm(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("\\bgru\\b", cls, perl = TRUE)) {
-      .k3_gru(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_gru(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("bidirectional", cls)) {
-      .k3_bidirectional(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_bidirectional(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("simplernn", cls)) {
-      .k3_simplernn(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_simplernn(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("unitnorm", cls)) {
-      .k3_unitnorm(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_unitnorm(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("zeropadding1d", cls)) {
-      .k3_zeropadding1d(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_zeropadding1d(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("permute", cls) && !grepl("2d|3d", cls)) {
-      .k3_permute(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_permute(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("cropping1d", cls)) {
-      .k3_cropping1d(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_cropping1d(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("repeatvector", cls)) {
-      .k3_repeatvector(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_repeatvector(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (
       grepl("\\battention\\b", cls, perl = TRUE) && !grepl("multihead", cls)
     ) {
-      .k3_attention(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_attention(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("additiveattention", cls)) {
-      .k3_additiveattention(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_additiveattention(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("timedistributed", cls)) {
-      .k3_timedistributed(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_timedistributed(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("\\bembedding\\b", cls, perl = TRUE)) {
-      .k3_embedding(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_embedding(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("groupedqueryattention", cls)) {
-      .k3_groupedqueryattention(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_groupedqueryattention(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else if (grepl("multiheadattention", cls)) {
-      .k3_multiheadattention(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense)
+      .k3_multiheadattention(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else {
       cli::cli_abort(c(
         "Unsupported layer type in Keras Functional model: {.cls {cls_orig}}.",
@@ -295,9 +745,9 @@ orbital_keras_dag_impl <- function(
     }
   }
 
-  all_exprs       <- state$all_exprs
+  all_exprs <- state$all_exprs
   out_pre_act_map <- state$out_pre_act_map
-  out_pre_act     <- state$out_pre_act
+  out_pre_act <- state$out_pre_act
 
   if (length(out_pre_act_map) == 0L) {
     cli::cli_abort(
