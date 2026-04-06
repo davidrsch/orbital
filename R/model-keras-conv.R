@@ -2,8 +2,16 @@
 # (Conv1DTranspose, DepthwiseConv1D, SeparableConv1D, ConvLSTM1D, Conv1D).
 # Called by orbital_keras_dag_impl() in model-keras.R.
 
-
-.k3_conv1dtranspose <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_conv1dtranspose <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Conv1DTranspose ─ transposed (fractionally-strided) 1-D convolution.
   # Keras weight layout (same as Conv1D):
   #   kernel : (kernel_size, in_channels, filters)  i.e. (kW, C_in, C_out)
@@ -104,13 +112,49 @@
       tconv_exprs <- c(tconv_exprs, expr_str)
     }
   }
+  # Apply inline activation if configured.
+  activation_config <- tryCatch(cfg_l$activation, error = function(e) NULL)
+  activation <- if (is.null(activation_config)) {
+    "linear"
+  } else if (is.list(activation_config)) {
+    tolower(as.character(activation_config$class_name)[1L])
+  } else {
+    tolower(as.character(activation_config)[1L])
+  }
+  if (!nzchar(activation %||% "")) {
+    activation <- "linear"
+  }
+  if (activation != "linear") {
+    act_alpha <- tryCatch(
+      as.numeric(
+        activation_config$config$alpha %||%
+          activation_config$config$negative_slope %||%
+          1.0
+      ),
+      error = function(e) 1.0
+    )
+    tconv_exprs <- vapply(
+      tconv_exprs,
+      function(e) activation_expr(activation, e, alpha = act_alpha),
+      character(1L)
+    )
+  }
   state$all_exprs[[lname]] <- stats::setNames(tconv_exprs, tconv_nms)
   assign(lname, tconv_nms, envir = expr_reg)
   invisible(NULL)
 }
 
 
-.k3_depthwiseconv1d <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_depthwiseconv1d <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # DepthwiseConv1D ─ channel-wise 1-D convolution (no cross-channel mixing).
   # Keras weight layout:
   #   depthwise_kernel : (kernel_size, in_channels, depth_multiplier)
@@ -194,13 +238,49 @@
       }
     }
   }
+  # Apply inline activation if configured.
+  activation_config <- tryCatch(cfg_l$activation, error = function(e) NULL)
+  activation <- if (is.null(activation_config)) {
+    "linear"
+  } else if (is.list(activation_config)) {
+    tolower(as.character(activation_config$class_name)[1L])
+  } else {
+    tolower(as.character(activation_config)[1L])
+  }
+  if (!nzchar(activation %||% "")) {
+    activation <- "linear"
+  }
+  if (activation != "linear") {
+    act_alpha <- tryCatch(
+      as.numeric(
+        activation_config$config$alpha %||%
+          activation_config$config$negative_slope %||%
+          1.0
+      ),
+      error = function(e) 1.0
+    )
+    dw_exprs <- vapply(
+      dw_exprs,
+      function(e) activation_expr(activation, e, alpha = act_alpha),
+      character(1L)
+    )
+  }
   state$all_exprs[[lname]] <- stats::setNames(dw_exprs, dw_nms)
   assign(lname, dw_nms, envir = expr_reg)
   invisible(NULL)
 }
 
 
-.k3_separableconv1d <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_separableconv1d <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # SeparableConv1D ─ depthwise + pointwise 1-D convolution.
   # Keras weight layout:
   #   depthwise_kernel  : (kernel_size, in_channels, depth_multiplier)
@@ -315,6 +395,33 @@
       sep_exprs <- c(sep_exprs, expr_str)
     }
   }
+  # Apply inline activation if configured (acts on the final pointwise outputs).
+  activation_config <- tryCatch(cfg_l$activation, error = function(e) NULL)
+  activation <- if (is.null(activation_config)) {
+    "linear"
+  } else if (is.list(activation_config)) {
+    tolower(as.character(activation_config$class_name)[1L])
+  } else {
+    tolower(as.character(activation_config)[1L])
+  }
+  if (!nzchar(activation %||% "")) {
+    activation <- "linear"
+  }
+  if (activation != "linear") {
+    act_alpha <- tryCatch(
+      as.numeric(
+        activation_config$config$alpha %||%
+          activation_config$config$negative_slope %||%
+          1.0
+      ),
+      error = function(e) 1.0
+    )
+    sep_exprs <- vapply(
+      sep_exprs,
+      function(e) activation_expr(activation, e, alpha = act_alpha),
+      character(1L)
+    )
+  }
   state$all_exprs[[lname]] <- c(
     stats::setNames(dw_exprs, dw_nms),
     stats::setNames(sep_exprs, sep_nms)
@@ -324,7 +431,16 @@
 }
 
 
-.k3_convlstm1d <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_convlstm1d <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # ConvLSTM1D ─ unrolled for fixed-length sequences with spatial dim = 1.
   # Keras weight layout (IFCO gate order):
   #   kernel           : (kernel_size, in_channels, 4 * filters)
@@ -368,9 +484,7 @@
       "i" = "Got padding={.val {pad_type}}, strides={.val {strides}}."
     ))
   }
-  if (
-    isTRUE(tryCatch(as.logical(cfg_l$stateful), error = function(e) FALSE))
-  ) {
+  if (isTRUE(tryCatch(as.logical(cfg_l$stateful), error = function(e) FALSE))) {
     cli::cli_abort(c(
       "ConvLSTM1D layer {.val {lname}}: stateful = TRUE is not supported by orbital.",
       "i" = "Only stateless ConvLSTM1Ds can be unrolled."
@@ -530,7 +644,16 @@
 }
 
 
-.k3_conv1d <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_conv1d <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Conv1D ─ sliding-window 1-D convolution.
   # Keras weight layout:
   #   kernel  : (kernel_size, in_channels, filters)
@@ -617,8 +740,34 @@
       conv_exprs <- c(conv_exprs, expr_str)
     }
   }
+  # Apply inline activation if configured.
+  activation_config <- tryCatch(cfg_l$activation, error = function(e) NULL)
+  activation <- if (is.null(activation_config)) {
+    "linear"
+  } else if (is.list(activation_config)) {
+    tolower(as.character(activation_config$class_name)[1L])
+  } else {
+    tolower(as.character(activation_config)[1L])
+  }
+  if (!nzchar(activation %||% "")) {
+    activation <- "linear"
+  }
+  if (activation != "linear") {
+    act_alpha <- tryCatch(
+      as.numeric(
+        activation_config$config$alpha %||%
+          activation_config$config$negative_slope %||%
+          1.0
+      ),
+      error = function(e) 1.0
+    )
+    conv_exprs <- vapply(
+      conv_exprs,
+      function(e) activation_expr(activation, e, alpha = act_alpha),
+      character(1L)
+    )
+  }
   state$all_exprs[[lname]] <- stats::setNames(conv_exprs, conv_nms)
   assign(lname, conv_nms, envir = expr_reg)
   invisible(NULL)
 }
-

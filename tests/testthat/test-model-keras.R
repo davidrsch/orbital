@@ -1328,6 +1328,42 @@ test_that("keras3 Functional model with standalone Activation(sigmoid) translati
   expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
 })
 
+test_that("keras3 Functional model with standalone Activation(relu) translations match", {
+  skip_if_not_installed("keras3")
+  skip_if_not_installed("reticulate")
+  skip_if_not(
+    reticulate::py_available(initialize = FALSE),
+    "Python not available"
+  )
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(3L))
+  x <- k$layers$Dense(6L)(inp)
+  x <- k$layers$Activation("relu")(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  x_mat <- matrix(rnorm(30), nrow = 10, ncol = 3)
+  y_vec <- rnorm(10)
+  model$fit(x_mat, y_vec, epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", 1:3)
+  df <- as.data.frame(x_mat)
+  names(df) <- feature_names
+  orb_obj <- orbital(
+    model,
+    mode = "regression",
+    feature_names = feature_names
+  )
+  expect_true(any(grepl("orbital_act_", names(orb_obj))))
+  act_exprs <- orb_obj[grepl("orbital_act_", names(orb_obj))]
+  expect_true(any(grepl("if_else", act_exprs)))
+  preds_orb <- predict(orb_obj, df)$.pred
+  preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
+  expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
+
 # ── multi-output Functional API (R audit rec #2 / R#32) ──────────────────────
 
 test_that("keras3 Functional model with two output Dense layers produces named predictions", {
@@ -1941,8 +1977,8 @@ test_that("keras3 Functional model with ELU layer predictions match", {
     mode = "regression",
     feature_names = feature_names
   )
-  # ELU layer routes through DAG and produces orbital_act_ expressions
-  expect_true(any(grepl("orbital_act_", names(orb_obj))))
+  # ELU layer routes through DAG and produces orbital_elu_ expressions
+  expect_true(any(grepl("orbital_elu_", names(orb_obj))))
   preds_orb <- predict(orb_obj, df)$.pred
   preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
   expect_equal(preds_orb, preds_keras, tolerance = 1e-5)

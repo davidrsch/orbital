@@ -657,10 +657,8 @@ orbital_keras_dag_impl <- function(
         output_layer_names,
         last_dense
       )
-    } else if (
-      grepl("\\battention\\b", cls, perl = TRUE) && !grepl("multihead", cls)
-    ) {
-      .k3_attention(
+    } else if (grepl("additiveattention", cls)) {
+      .k3_additiveattention(
         l,
         lname,
         topo_map,
@@ -670,8 +668,21 @@ orbital_keras_dag_impl <- function(
         output_layer_names,
         last_dense
       )
-    } else if (grepl("additiveattention", cls)) {
-      .k3_additiveattention(
+    } else if (grepl("groupedqueryattention", cls)) {
+      .k3_groupedqueryattention(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
+    } else if (
+      grepl("\\battention\\b", cls, perl = TRUE) && !grepl("multihead", cls)
+    ) {
+      .k3_attention(
         l,
         lname,
         topo_map,
@@ -694,17 +705,6 @@ orbital_keras_dag_impl <- function(
       )
     } else if (grepl("\\bembedding\\b", cls, perl = TRUE)) {
       .k3_embedding(
-        l,
-        lname,
-        topo_map,
-        expr_reg,
-        state,
-        weight_map,
-        output_layer_names,
-        last_dense
-      )
-    } else if (grepl("groupedqueryattention", cls)) {
-      .k3_groupedqueryattention(
         l,
         lname,
         topo_map,
@@ -810,27 +810,84 @@ orbital_keras_impl <- function(
   all_layers <- x$layers
 
   # Detect layers that require DAG traversal (merge, normalisation, learned activations).
+  nl_re <- paste0(
+    c(
+      # Merge layers
+      "\\badd\\b",
+      "concatenate",
+      "\\bmultiply\\b",
+      "\\baverage\\b",
+      "\\bmaximum\\b",
+      "\\bminimum\\b",
+      "\\bdot\\b",
+      "\\bsubtract\\b",
+      # Normalisation
+      "batchnorm",
+      "layernorm",
+      "instancenorm",
+      "groupnorm",
+      "rmsnormalization",
+      "unitnorm",
+      # Learned activations
+      "prelu",
+      "leakyrelu",
+      "\\belu\\b",
+      "\\brelu\\b",
+      "\\bactivation\\b",
+      "\\bsoftmax\\b",
+      # Pooling
+      "globalaveragepool",
+      "globalmaxpool",
+      "adaptiveaveragepooling1d",
+      "adaptivemaxpooling1d",
+      "averagepooling1d",
+      "maxpooling1d",
+      "globalsumpooling",
+      # Recurrent
+      "\\blstm\\b",
+      "\\bgru\\b",
+      "convlstm1d",
+      "bidirectional",
+      "simplernn",
+      # Convolution
+      "conv1d",
+      "conv1dtranspose",
+      "depthwiseconv1d",
+      "separableconv1d",
+      # Attention (specific patterns before the generic guard)
+      "additiveattention",
+      "groupedqueryattention",
+      "\\battention\\b",
+      "multiheadattention",
+      # Spatial / sequence
+      "zeropadding1d",
+      "permute",
+      "cropping1d",
+      "repeatvector",
+      "\\bembedding\\b",
+      "timedistributed",
+      "upsampling1d"
+    ),
+    collapse = "|"
+  )
+  nl_excl_re <- paste0(
+    c(
+      "\\bdense\\b",
+      "input",
+      "flatten",
+      "reshape",
+      "dropout",
+      "depthwiseconv2d",
+      "separableconv2d",
+      "2d",
+      "3d"
+    ),
+    collapse = "|"
+  )
   non_linear_layers <- Filter(
     function(l) {
       cls <- tolower(class(l)[1L])
-      grepl(
-        paste0(
-          "\\badd\\b|concatenate|batchnorm|layernorm|instancenorm|groupnorm|",
-          "rmsnormalization|prelu|leakyrelu|\\belu\\b|globalaveragepool|",
-          "globalmaxpool|adaptiveaveragepooling1d|adaptivemaxpooling1d|averagepooling1d|maxpooling1d|globalsumpooling|",
-          "\\brelu\\b|\\bactivation\\b|\\bsoftmax\\b|\\blstm\\b|\\bgru\\b|convlstm1d|conv1d|",
-          "bidirectional|simplernn|unitnorm|zeropadding1d|multiheadattention|",
-          "\\bmultiply\\b|\\baverage\\b|\\bmaximum\\b|\\bminimum\\b|\\bdot\\b|\\bsubtract\\b|",
-          "permute|cropping1d|repeatvector|conv1dtranspose|\\battention\\b|additiveattention|",
-          "depthwiseconv1d|separableconv1d|\\bembedding\\b|timedistributed|upsampling1d"
-        ),
-        cls,
-        perl = TRUE
-      ) &&
-        !grepl(
-          "dense|input|flatten|reshape|dropout|depthwiseconv2d|separableconv2d|2d|3d",
-          cls
-        )
+      grepl(nl_re, cls, perl = TRUE) && !grepl(nl_excl_re, cls, perl = TRUE)
     },
     all_layers
   )
