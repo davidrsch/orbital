@@ -448,6 +448,86 @@ orbital_keras_dag_impl <- function(
 
     if (grepl("input", cls)) {
       assign(lname, input_names, envir = expr_reg)
+    } else if (grepl("einsumdense", cls)) {
+      # EinsumDense ─ generalised einsum projection; only Dense-equivalent equations.
+      # Supported:
+      #   "ab,bc->ac"   : input (B,A), kernel (A,C), output (B,C)  — simple Dense
+      #   "...b,bc->...c": same with NumPy ellipsis                 — simple Dense
+      #   "abc,cd->abd" : input (B,T,C), kernel (C,D), output (B,T,D) — time-dist Dense
+      inbound <- topo_map[[lname]]
+      if (is.null(inbound) || length(inbound) < 1L) {
+        cli::cli_abort(
+          "EinsumDense layer {.val {lname}} has no inbound connections in model config."
+        )
+      }
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      wts <- l$get_weights()
+      if (length(wts) < 1L) {
+        cli::cli_abort("EinsumDense layer {.val {lname}} has no weights.")
+      }
+      cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+      equation_raw <- tryCatch(as.character(cfg_l$equation), error = function(e) "")
+      equation <- gsub("\\s+", "", equation_raw)
+
+      activation_config <- tryCatch(cfg_l$activation, error = function(e) NULL)
+      activation <- if (is.null(activation_config)) {
+        "linear"
+      } else if (is.list(activation_config)) {
+        tolower(as.character(activation_config$class_name)[1L])
+      } else {
+        tolower(as.character(activation_config)[1L])
+      }
+      if (!nzchar(activation)) activation <- "linear"
+
+      kern <- wts[[1L]]
+      bias_v_raw <- if (length(wts) >= 2L) as.numeric(wts[[2L]]) else NULL
+
+      if (equation %in% c("ab,bc->ac", "...b,bc->...c")) {
+        # Simple Dense: kernel (A, C); treat like Dense.
+        n_out <- ncol(kern)
+        bias_use <- if (is.null(bias_v_raw)) numeric(n_out) else bias_v_raw
+        pre_act <- build_mlp_pre_act(t(kern), bias_use, in_exprs)
+        act_exprs <- vapply(
+          pre_act,
+          function(z) activation_expr(activation, z),
+          character(1L)
+        )
+        unit_names <- paste0(
+          "orbital_einsumdense_", lname, "_h", seq_along(act_exprs)
+        )
+        all_exprs[[lname]] <- stats::setNames(act_exprs, unit_names)
+        assign(lname, unit_names, envir = expr_reg)
+      } else if (equation == "abc,cd->abd") {
+        # Time-distributed Dense: kernel (C, D); apply per spatial position.
+        C_last <- nrow(kern)
+        D_out <- ncol(kern)
+        T_len <- as.integer(length(in_exprs) / C_last)
+        bias_use <- if (is.null(bias_v_raw)) numeric(D_out) else bias_v_raw
+        k_T <- t(kern) # (D_out, C_last) for build_mlp_pre_act
+        out_nms <- character(0L)
+        out_exprs <- character(0L)
+        for (p in seq_len(T_len)) {
+          in_slice <- in_exprs[((p - 1L) * C_last + 1L):(p * C_last)]
+          pre_act <- build_mlp_pre_act(k_T, bias_use, in_slice)
+          ae <- vapply(
+            pre_act,
+            function(z) activation_expr(activation, z),
+            character(1L)
+          )
+          nms <- paste0(
+            "orbital_einsumdense_", lname, "_t", p, "_h", seq_len(D_out)
+          )
+          out_nms <- c(out_nms, nms)
+          out_exprs <- c(out_exprs, ae)
+        }
+        all_exprs[[lname]] <- stats::setNames(out_exprs, out_nms)
+        assign(lname, out_nms, envir = expr_reg)
+      } else {
+        cli::cli_abort(c(
+          "EinsumDense layer {.val {lname}}: equation {.val {equation}} is not supported by orbital.",
+          "i" = "Supported equations: 'ab,bc->ac', '...b,bc->...c', 'abc,cd->abd'."
+        ))
+      }
     } else if (grepl("dense", cls)) {
       inbound <- topo_map[[lname]]
       if (is.null(inbound) || length(inbound) < 1L) {
@@ -2072,6 +2152,184 @@ orbital_keras_dag_impl <- function(
         stats::setNames(sep_exprs, sep_nms)
       )
       assign(lname, sep_nms, envir = expr_reg)
+    } else if (grepl("convlstm1d", cls)) {
+      # ConvLSTM1D ─ unrolled for fixed-length sequences with spatial dim = 1.
+      # Keras weight layout (IFCO gate order):
+      #   kernel           : (kernel_size, in_channels, 4 * filters)
+      #   recurrent_kernel : (kernel_size, filters,     4 * filters)
+      #   bias             : (4 * filters,)  [optional]
+      # Restriction: only spatial dimension S = 1, strides = 1, padding = "same".
+      # With S=1 and padding="same", each spatial convolution reduces to a
+      # single-position dot product using the centre kernel row (index pad_l).
+      # This makes ConvLSTM1D equivalent to a plain LSTM after weight slicing.
+      inbound <- topo_map[[lname]]
+      in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+      wts <- l$get_weights() # kernel, recurrent_kernel [, bias]
+      kernel <- wts[[1L]] # (k, C, 4F)
+      rkernel <- wts[[2L]] # (k, F, 4F)
+      k_size <- dim(kernel)[1L]
+      C_in <- dim(kernel)[2L]
+      F_filt <- as.integer(dim(kernel)[3L] / 4L)
+      bias_v <- if (length(wts) >= 3L) as.numeric(wts[[3L]]) else numeric(4L * F_filt)
+
+      cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+      pad_type <- tryCatch(
+        tolower(as.character(cfg_l$padding)),
+        error = function(e) "same"
+      )
+      strides <- tryCatch(as.integer(cfg_l$strides[[1L]]), error = function(e) 1L)
+      if (is.na(strides)) strides <- 1L
+      if (!nzchar(pad_type %||% "")) pad_type <- "same"
+      if (pad_type != "same" || strides != 1L) {
+        cli::cli_abort(c(
+          "ConvLSTM1D layer {.val {lname}}: orbital only supports padding='same' and strides=1.",
+          "i" = "Got padding={.val {pad_type}}, strides={.val {strides}}."
+        ))
+      }
+      if (
+        isTRUE(tryCatch(as.logical(cfg_l$stateful), error = function(e) FALSE))
+      ) {
+        cli::cli_abort(c(
+          "ConvLSTM1D layer {.val {lname}}: stateful = TRUE is not supported by orbital.",
+          "i" = "Only stateless ConvLSTM1Ds can be unrolled."
+        ))
+      }
+
+      # Infer spatial dimension S from input_shape.
+      # Keras input_shape for ConvLSTM1D: (batch, T, S, C_in).
+      in_shape <- tryCatch(
+        as.integer(unlist(l$input_shape)),
+        error = function(e) NULL
+      )
+      in_shape_valid <- if (!is.null(in_shape)) in_shape[!is.na(in_shape)] else integer(0L)
+      # in_shape_valid (after dropping NA batch dim): [T, S, C_in]
+      if (length(in_shape_valid) >= 2L) {
+        S_spatial <- as.integer(in_shape_valid[length(in_shape_valid) - 1L])
+      } else {
+        S_spatial <- NA_integer_
+      }
+      if (is.na(S_spatial) || S_spatial != 1L) {
+        cli::cli_abort(c(
+          "ConvLSTM1D layer {.val {lname}}: orbital only supports spatial dimension S = 1.",
+          "i" = "Got S = {.val {S_spatial}}."
+        ))
+      }
+      # With S=1: in_exprs has T_len * C_in features (the single spatial position is trivial).
+      T_len <- as.integer(length(in_exprs) / C_in)
+
+      gate_act <- tryCatch(
+        tolower(as.character(cfg_l$recurrent_activation %||% "sigmoid")),
+        error = function(e) "sigmoid"
+      )
+      cell_act <- tryCatch(
+        tolower(as.character(cfg_l$activation %||% "tanh")),
+        error = function(e) "tanh"
+      )
+      return_seq <- isTRUE(
+        tryCatch(as.logical(cfg_l$return_sequences), error = function(e) FALSE)
+      )
+
+      # Centre kernel row (0-indexed pad_l → 1-indexed pad_l + 1L in R).
+      pad_l <- as.integer((k_size - 1L) %/% 2L)
+      # eff_kern  : (C_in, 4*F_filt) — equivalent to LSTM kernel  (I, 4H)
+      # eff_rkernel: (F_filt, 4*F_filt) — equivalent to LSTM recurrent_kernel (H, 4H)
+      eff_kern <- kernel[pad_l + 1L, , ]
+      dim(eff_kern) <- c(C_in, 4L * F_filt)
+      eff_rkernel <- rkernel[pad_l + 1L, , ]
+      dim(eff_rkernel) <- c(F_filt, 4L * F_filt)
+
+      # IFCO gate offsets (0-indexed): I=0, F_gate=F_filt, C_tilde=2F_filt, O=3F_filt
+      g_offs <- c(0L, F_filt, 2L * F_filt, 3L * F_filt)
+      W_gates <- lapply(seq_along(g_offs), function(g) {
+        t(eff_kern[, (g_offs[g] + 1L):(g_offs[g] + F_filt)])
+      })
+      R_gates <- lapply(seq_along(g_offs), function(g) {
+        t(eff_rkernel[, (g_offs[g] + 1L):(g_offs[g] + F_filt)])
+      })
+      B_gates <- lapply(seq_along(g_offs), function(g) {
+        as.numeric(bias_v[(g_offs[g] + 1L):(g_offs[g] + F_filt)])
+      })
+
+      all_clstm_nms <- character(0L)
+      all_clstm_exprs <- character(0L)
+      all_H_nms <- list()
+
+      H_prev_nms <- NULL # NULL = zero initial hidden state
+      C_prev_nms <- NULL # NULL = zero initial cell state
+
+      for (t in seq_len(T_len)) {
+        x_t_exprs <- in_exprs[((t - 1L) * C_in + 1L):(t * C_in)]
+
+        pre_gates <- lapply(seq_along(g_offs), function(g) {
+          inp <- build_mlp_pre_act(W_gates[[g]], B_gates[[g]], x_t_exprs)
+          if (is.null(H_prev_nms)) {
+            inp
+          } else {
+            rec <- build_mlp_pre_act(R_gates[[g]], numeric(F_filt), H_prev_nms)
+            paste0("(", inp, " + ", rec, ")")
+          }
+        })
+
+        act_I <- vapply(
+          pre_gates[[1L]],
+          function(e) activation_expr(gate_act, e),
+          character(1L)
+        )
+        act_F <- vapply(
+          pre_gates[[2L]],
+          function(e) activation_expr(gate_act, e),
+          character(1L)
+        )
+        act_C <- vapply(
+          pre_gates[[3L]],
+          function(e) activation_expr(cell_act, e),
+          character(1L)
+        )
+        act_O <- vapply(
+          pre_gates[[4L]],
+          function(e) activation_expr(gate_act, e),
+          character(1L)
+        )
+
+        C_cur_nms <- paste0(
+          "orbital_convlstm_", lname, "_C_t", t, "_h", seq_len(F_filt)
+        )
+        C_cur_exprs <- if (is.null(C_prev_nms)) {
+          paste0("(", act_I, " * ", act_C, ")")
+        } else {
+          paste0(
+            "(",
+            act_F,
+            " * ",
+            backtick(C_prev_nms),
+            " + ",
+            act_I,
+            " * ",
+            act_C,
+            ")"
+          )
+        }
+
+        H_cur_nms <- paste0(
+          "orbital_convlstm_", lname, "_H_t", t, "_h", seq_len(F_filt)
+        )
+        H_cur_exprs <- paste0("(", act_O, " * tanh(", backtick(C_cur_nms), "))")
+
+        all_clstm_nms <- c(all_clstm_nms, C_cur_nms, H_cur_nms)
+        all_clstm_exprs <- c(all_clstm_exprs, C_cur_exprs, H_cur_exprs)
+        all_H_nms[[t]] <- H_cur_nms
+
+        H_prev_nms <- H_cur_nms
+        C_prev_nms <- C_cur_nms
+      }
+
+      all_exprs[[lname]] <- stats::setNames(all_clstm_exprs, all_clstm_nms)
+      out_nms <- if (return_seq) {
+        unlist(all_H_nms, use.names = FALSE)
+      } else {
+        H_prev_nms
+      }
+      assign(lname, out_nms, envir = expr_reg)
     } else if (
       grepl("conv1d", cls) && !grepl("depthwise|separable|transpose|2d|3d", cls)
     ) {
@@ -3902,12 +4160,12 @@ orbital_keras_dag_impl <- function(
       cli::cli_abort(c(
         "Unsupported layer type in Keras Functional model: {.cls {cls_orig}}.",
         "i" = paste(
-          "orbital supports: Dense, Add, Concatenate, BatchNormalization,",
+          "orbital supports: Dense, EinsumDense, Add, Concatenate, BatchNormalization,",
           "LayerNormalization, InstanceNormalization, GroupNormalization,",
           "RMSNormalization, PReLU, GlobalAveragePooling1D, GlobalMaxPooling1D,",
           "AdaptiveAveragePooling1D, AdaptiveMaxPooling1D,",
           "AveragePooling1D, MaxPooling1D, GlobalSumPooling1D,",
-          "Conv1D, LSTM, GRU, Bidirectional(LSTM/GRU), SimpleRNN,",
+          "Conv1D, ConvLSTM1D, LSTM, GRU, Bidirectional(LSTM/GRU), SimpleRNN,",
           "UnitNormalization, ZeroPadding1D, Embedding, TimeDistributed(Dense),",
           "MultiHeadAttention, Attention, AdditiveAttention, Subtract,",
           "UpSampling1D, Dropout, SpatialDropout1D, GaussianDropout,",
@@ -3987,7 +4245,7 @@ orbital_keras_impl <- function(
           "\\badd\\b|concatenate|batchnorm|layernorm|instancenorm|groupnorm|",
           "rmsnormalization|prelu|leakyrelu|\\belu\\b|globalaveragepool|",
           "globalmaxpool|adaptiveaveragepooling1d|adaptivemaxpooling1d|averagepooling1d|maxpooling1d|globalsumpooling|",
-          "\\brelu\\b|\\bactivation\\b|\\bsoftmax\\b|\\blstm\\b|\\bgru\\b|conv1d|",
+          "\\brelu\\b|\\bactivation\\b|\\bsoftmax\\b|\\blstm\\b|\\bgru\\b|convlstm1d|conv1d|",
           "bidirectional|simplernn|unitnorm|zeropadding1d|multiheadattention|",
           "\\bmultiply\\b|\\baverage\\b|\\bmaximum\\b|\\bminimum\\b|\\bdot\\b|\\bsubtract\\b|",
           "permute|cropping1d|repeatvector|conv1dtranspose|\\battention\\b|additiveattention|",
