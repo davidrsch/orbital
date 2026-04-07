@@ -2,7 +2,6 @@
 # Provides .keras_parse_inbound() and orbital_keras_dag_impl() called by
 # orbital_keras_impl() in model-keras-impl.R.
 
-
 # Internal: parse inbound layer names from one layer's config entry.
 # Handles keras3 new format ({args: [{keras_history: ["name", 0, 0]}]})
 # and old keras format ([[["name", 0, 0], ...]]).
@@ -759,8 +758,28 @@ orbital_keras_dag_impl <- function(
   out_pre_act <- state$out_pre_act
 
   if (length(out_pre_act_map) == 0L) {
+    out_layer_types <- vapply(
+      all_layers,
+      function(l) {
+        if (l$name %in% output_layer_names) class(l)[1L] else NA_character_
+      },
+      character(1L)
+    )
+    out_layer_types <- out_layer_types[!is.na(out_layer_types)]
     cli::cli_abort(
-      "Could not identify any output Dense layer in the Keras model."
+      c(
+        "Could not identify any output Dense layer in the Keras model.",
+        "i" = if (length(out_layer_types) > 0L) {
+          paste0(
+            "The output layer(s) identified are of type: ",
+            paste(out_layer_types, collapse = ", "),
+            "."
+          )
+        } else {
+          "No output layer names could be resolved from the model config."
+        },
+        "i" = "orbital requires the final output layer to be a Dense (or EinsumDense) layer. Standalone Activation, Softmax, or BatchNormalization output layers are not supported as the last layer."
+      )
     )
   }
 
@@ -805,5 +824,3 @@ orbital_keras_dag_impl <- function(
     )
   }
 }
-
-

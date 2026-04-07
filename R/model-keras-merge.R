@@ -2,8 +2,16 @@
 # Maximum, Minimum, Subtract, Dot, Concatenate).
 # Called by orbital_keras_dag_impl() in model-keras.R.
 
-
-.k3_add <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_add <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Element-wise Add: supports skip / residual connections (>=2 inputs)
   inbound <- topo_map[[lname]]
   if (is.null(inbound) || length(inbound) < 2L) {
@@ -16,9 +24,10 @@
   })
   widths <- lengths(all_inbound_exprs)
   if (length(unique(widths)) != 1L) {
-    cli::cli_abort(
-      "Keras Add layer {.val {lname}}: all inputs must have the same width (got: {paste(widths, collapse = ', ')})."
-    )
+    cli::cli_abort(c(
+      "Keras Add layer {.val {lname}}: all inputs must have the same width.",
+      "i" = "got: {paste(widths, collapse = ', ')}"
+    ))
   }
   add_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
   add_exprs <- vapply(
@@ -39,22 +48,33 @@
 }
 
 
-.k3_multiply <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_multiply <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Element-wise Multiply: element-wise product of >=2 inputs
   inbound <- topo_map[[lname]]
   if (is.null(inbound) || length(inbound) < 2L) {
-    cli::cli_abort(
-      "Keras Multiply layer {.val {lname}} must have at least 2 inbound inputs, got {length(inbound)}."
-    )
+    cli::cli_abort(c(
+      "Keras Multiply layer {.val {lname}} must have at least 2 inbound inputs.",
+      "i" = "got {length(inbound)}"
+    ))
   }
   all_inbound_exprs <- lapply(inbound, function(nm) {
     get(nm, envir = expr_reg, inherits = FALSE)
   })
   widths <- lengths(all_inbound_exprs)
   if (length(unique(widths)) != 1L) {
-    cli::cli_abort(
-      "Keras Multiply layer {.val {lname}}: all inputs must have the same width (got: {paste(widths, collapse = ', ')})."
-    )
+    cli::cli_abort(c(
+      "Keras Multiply layer {.val {lname}}: all inputs must have the same width.",
+      "i" = "got: {paste(widths, collapse = ', ')}"
+    ))
   }
   mul_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
   mul_exprs <- vapply(
@@ -75,22 +95,33 @@
 }
 
 
-.k3_average <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_average <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Element-wise Average: mean of >=2 inputs
   inbound <- topo_map[[lname]]
   if (is.null(inbound) || length(inbound) < 2L) {
-    cli::cli_abort(
-      "Keras Average layer {.val {lname}} must have at least 2 inbound inputs, got {length(inbound)}."
-    )
+    cli::cli_abort(c(
+      "Keras Average layer {.val {lname}} must have at least 2 inbound inputs.",
+      "i" = "got {length(inbound)}"
+    ))
   }
   all_inbound_exprs <- lapply(inbound, function(nm) {
     get(nm, envir = expr_reg, inherits = FALSE)
   })
   widths <- lengths(all_inbound_exprs)
   if (length(unique(widths)) != 1L) {
-    cli::cli_abort(
-      "Keras Average layer {.val {lname}}: all inputs must have the same width (got: {paste(widths, collapse = ', ')})."
-    )
+    cli::cli_abort(c(
+      "Keras Average layer {.val {lname}}: all inputs must have the same width.",
+      "i" = "got: {paste(widths, collapse = ', ')}"
+    ))
   }
   n_inputs <- length(inbound)
   avg_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
@@ -118,22 +149,33 @@
 }
 
 
-.k3_maximum <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_maximum <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Element-wise Maximum: per-element max over >=2 inputs
   inbound <- topo_map[[lname]]
   if (is.null(inbound) || length(inbound) < 2L) {
-    cli::cli_abort(
-      "Keras Maximum layer {.val {lname}} must have at least 2 inbound inputs, got {length(inbound)}."
-    )
+    cli::cli_abort(c(
+      "Keras Maximum layer {.val {lname}} must have at least 2 inbound inputs.",
+      "i" = "got {length(inbound)}"
+    ))
   }
   all_inbound_exprs <- lapply(inbound, function(nm) {
     get(nm, envir = expr_reg, inherits = FALSE)
   })
   widths <- lengths(all_inbound_exprs)
   if (length(unique(widths)) != 1L) {
-    cli::cli_abort(
-      "Keras Maximum layer {.val {lname}}: all inputs must have the same width (got: {paste(widths, collapse = ', ')})."
-    )
+    cli::cli_abort(c(
+      "Keras Maximum layer {.val {lname}}: all inputs must have the same width.",
+      "i" = "got: {paste(widths, collapse = ', ')}"
+    ))
   }
   max_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
   max_exprs <- vapply(
@@ -154,22 +196,33 @@
 }
 
 
-.k3_minimum <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_minimum <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Element-wise Minimum: per-element min over >=2 inputs
   inbound <- topo_map[[lname]]
   if (is.null(inbound) || length(inbound) < 2L) {
-    cli::cli_abort(
-      "Keras Minimum layer {.val {lname}} must have at least 2 inbound inputs, got {length(inbound)}."
-    )
+    cli::cli_abort(c(
+      "Keras Minimum layer {.val {lname}} must have at least 2 inbound inputs.",
+      "i" = "got {length(inbound)}"
+    ))
   }
   all_inbound_exprs <- lapply(inbound, function(nm) {
     get(nm, envir = expr_reg, inherits = FALSE)
   })
   widths <- lengths(all_inbound_exprs)
   if (length(unique(widths)) != 1L) {
-    cli::cli_abort(
-      "Keras Minimum layer {.val {lname}}: all inputs must have the same width (got: {paste(widths, collapse = ', ')})."
-    )
+    cli::cli_abort(c(
+      "Keras Minimum layer {.val {lname}}: all inputs must have the same width.",
+      "i" = "got: {paste(widths, collapse = ', ')}"
+    ))
   }
   min_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
   min_exprs <- vapply(
@@ -190,20 +243,31 @@
 }
 
 
-.k3_subtract <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_subtract <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Element-wise Subtract: first_input - second_input
   inbound <- topo_map[[lname]]
   if (is.null(inbound) || length(inbound) != 2L) {
-    cli::cli_abort(
-      "Keras Subtract layer {.val {lname}} requires exactly 2 inbound inputs, got {length(inbound)}."
-    )
+    cli::cli_abort(c(
+      "Keras Subtract layer {.val {lname}} requires exactly 2 inbound inputs.",
+      "i" = "got {length(inbound)}"
+    ))
   }
   exprs_a <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   exprs_b <- get(inbound[2L], envir = expr_reg, inherits = FALSE)
   if (length(exprs_a) != length(exprs_b)) {
-    cli::cli_abort(
-      "Keras Subtract layer {.val {lname}}: both inputs must have the same width (got: {length(exprs_a)} vs {length(exprs_b)})."
-    )
+    cli::cli_abort(c(
+      "Keras Subtract layer {.val {lname}}: both inputs must have the same width.",
+      "i" = "got: {length(exprs_a)} vs {length(exprs_b)}"
+    ))
   }
   sub_names <- paste0("orbital_", lname, "_h", seq_len(length(exprs_a)))
   sub_exprs <- vapply(
@@ -217,7 +281,16 @@
 }
 
 
-.k3_dot <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_dot <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Dot product: sum of element-wise products of exactly 2 inputs (axes=-1)
   inbound <- topo_map[[lname]]
   if (is.null(inbound) || length(inbound) != 2L) {
@@ -239,6 +312,7 @@
       "Keras Dot layer {.val {lname}}: only axes=-1 (feature-axis dot product) is supported."
     )
   }
+  normalize <- isTRUE(cfg$normalize)
   dot_name <- paste0("orbital_", lname, "_dot")
   terms <- vapply(
     seq_along(exprs_a),
@@ -248,13 +322,38 @@
     character(1L)
   )
   dot_expr <- paste0("(", paste(terms, collapse = " + "), ")")
+  if (normalize) {
+    # Cosine similarity: dot(a, b) / (||a||_2 * ||b||_2)
+    sq_a <- vapply(
+      exprs_a,
+      function(e) paste0("(", backtick(e), ")^2"),
+      character(1L)
+    )
+    sq_b <- vapply(
+      exprs_b,
+      function(e) paste0("(", backtick(e), ")^2"),
+      character(1L)
+    )
+    norm_a <- paste0("sqrt(", paste(sq_a, collapse = " + "), ")")
+    norm_b <- paste0("sqrt(", paste(sq_b, collapse = " + "), ")")
+    dot_expr <- paste0("(", dot_expr, " / (", norm_a, " * ", norm_b, "))")
+  }
   state$all_exprs[[lname]] <- stats::setNames(dot_expr, dot_name)
   assign(lname, dot_name, envir = expr_reg)
   invisible(NULL)
 }
 
 
-.k3_concatenate <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_concatenate <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Concatenate: merge expression-name vectors from all inbound branches
   inbound <- topo_map[[lname]]
   if (is.null(inbound) || length(inbound) < 2L) {
@@ -268,4 +367,3 @@
   assign(lname, combined_names, envir = expr_reg)
   invisible(NULL)
 }
-

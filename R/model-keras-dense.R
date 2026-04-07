@@ -1,8 +1,16 @@
 # Handler functions for Dense / EinsumDense layers.
 # Called by orbital_keras_dag_impl() in model-keras.R.
 
-
-.k3_einsumdense <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_einsumdense <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # EinsumDense ─ generalised einsum projection; only Dense-equivalent equations.
   # Supported:
   #   "ab,bc->ac"   : input (B,A), kernel (A,C), output (B,C)  — simple Dense
@@ -37,6 +45,14 @@
   if (!nzchar(activation)) {
     activation <- "linear"
   }
+  act_alpha <- if (
+    is.list(activation_config) &&
+      !is.null(activation_config[["config"]])
+  ) {
+    activation_config[["config"]][["alpha"]]
+  } else {
+    NULL
+  }
 
   kern <- wts[[1L]]
   bias_v_raw <- if (length(wts) >= 2L) as.numeric(wts[[2L]]) else NULL
@@ -48,7 +64,7 @@
     pre_act <- build_mlp_pre_act(t(kern), bias_use, in_exprs)
     act_exprs <- vapply(
       pre_act,
-      function(z) activation_expr(activation, z),
+      function(z) activation_expr(activation, z, alpha = act_alpha),
       character(1L)
     )
     unit_names <- paste0(
@@ -73,7 +89,7 @@
       pre_act <- build_mlp_pre_act(k_T, bias_use, in_slice)
       ae <- vapply(
         pre_act,
-        function(z) activation_expr(activation, z),
+        function(z) activation_expr(activation, z, alpha = act_alpha),
         character(1L)
       )
       nms <- paste0(
@@ -99,7 +115,16 @@
 }
 
 
-.k3_dense <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_dense <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   inbound <- topo_map[[lname]]
   if (is.null(inbound) || length(inbound) < 1L) {
     cli::cli_abort(
@@ -161,4 +186,3 @@
   }
   invisible(NULL)
 }
-

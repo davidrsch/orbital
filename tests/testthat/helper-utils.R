@@ -1,3 +1,13 @@
+## Skip guard for keras3 + reticulate tests
+skip_if_no_keras3 <- function() {
+  skip_if_not_installed("keras3")
+  skip_if_not_installed("reticulate")
+  skip_if_not(
+    reticulate::py_available(initialize = FALSE),
+    "Python not available"
+  )
+}
+
 ## For sparklyr testing
 
 testthat_tbl <- function(name, data = NULL, repartition = 0L) {

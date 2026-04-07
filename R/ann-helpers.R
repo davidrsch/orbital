@@ -9,7 +9,11 @@
 .erf_approx_expr <- function(z_expr) {
   t <- glue::glue("(1.0 / (1.0 + 0.3275911 * abs({z_expr})))")
   poly <- glue::glue(
-    "({t} * (0.254829592 + {t} * (-0.284496736 + {t} * (1.421413741 + {t} * (-1.453152027 + {t} * 1.061405429)))))"
+    "({t} * (0.254829592",
+    " + {t} * (-0.284496736",
+    " + {t} * (1.421413741",
+    " + {t} * (-1.453152027",
+    " + {t} * 1.061405429)))))"
   )
   glue::glue(
     "dplyr::if_else(({z_expr}) >= 0.0, 1.0, -1.0) * (1.0 - {poly} * exp(-({z_expr})^2))"
@@ -47,7 +51,8 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
     "celu" = {
       a <- if (is.null(alpha)) 1.0 else alpha
       glue::glue(
-        "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * (exp({x_expr} / {format_numeric(a)}) - 1))"
+        "dplyr::if_else({x_expr} >= 0, {x_expr},",
+        " {format_numeric(a)} * (exp({x_expr} / {format_numeric(a)}) - 1))"
       )
     },
     # SELU constants from Klambauer et al. 2017 (https://arxiv.org/abs/1706.02515):
@@ -57,7 +62,9 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
     # Note: PyTorch uses alpha=1.6732631921768192 (differs by ~5e-8), which is
     # the value present in the ONNX spec. Keras 3 uses the paper value above.
     "selu" = glue::glue(
-      "dplyr::if_else({x_expr} > 0, 1.0507009873554805 * {x_expr}, 1.7580993408474319 * (exp({x_expr}) - 1))"
+      "dplyr::if_else({x_expr} > 0,",
+      " 1.0507009873554805 * {x_expr},",
+      " 1.7580993408474319 * (exp({x_expr}) - 1))"
     ),
     # Exact GELU (default in Keras3 / PyTorch approximate=False):
     # gelu(x) = x * 0.5 * (1 + erf(x/sqrt(2))) via A&S 7.1.28 polynomial.
@@ -77,7 +84,8 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
     ),
     # Keras3 hard_sigmoid: clamp x to [-2.5, 2.5], then 0.2*x + 0.5
     "hard_sigmoid" = glue::glue(
-      "dplyr::if_else({x_expr} <= -2.5, 0, dplyr::if_else({x_expr} >= 2.5, 1, 0.2 * {x_expr} + 0.5))"
+      "dplyr::if_else({x_expr} <= -2.5, 0,",
+      " dplyr::if_else({x_expr} >= 2.5, 1, 0.2 * {x_expr} + 0.5))"
     ),
     "hardtanh" = glue::glue(
       "dplyr::if_else({x_expr} < -1, -1, dplyr::if_else({x_expr} > 1, 1, {x_expr}))"
@@ -85,7 +93,8 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
     "hard_silu" = ,
     "hard_swish" = ,
     "hardswish" = glue::glue(
-      "{x_expr} * dplyr::if_else({x_expr} <= -3, 0, dplyr::if_else({x_expr} >= 3, 1, ({x_expr} + 3) / 6))"
+      "{x_expr} * dplyr::if_else({x_expr} <= -3, 0,",
+      " dplyr::if_else({x_expr} >= 3, 1, ({x_expr} + 3) / 6))"
     ),
     "leaky_relu" = {
       a <- if (is.null(alpha)) 0.01 else alpha
@@ -112,7 +121,8 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
     "softplus" = glue::glue("log(1 + exp({x_expr}))"),
     "mish" = glue::glue("{x_expr} * tanh(log(1 + exp({x_expr})))"),
     "softshrink" = glue::glue(
-      "dplyr::if_else({x_expr} > 0.5, {x_expr} - 0.5, dplyr::if_else({x_expr} < -0.5, {x_expr} + 0.5, 0))"
+      "dplyr::if_else({x_expr} > 0.5, {x_expr} - 0.5,",
+      " dplyr::if_else({x_expr} < -0.5, {x_expr} + 0.5, 0))"
     ),
     "softsign" = glue::glue("{x_expr} / (1 + abs({x_expr}))"),
     "tanhshrink" = glue::glue("{x_expr} - tanh({x_expr})"),
@@ -132,7 +142,10 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
           "Use a standalone {.cls Activation(\"softmax\")} layer or a",
           "standalone {.cls Softmax} layer placed after a linear Dense layer."
         ),
-        "i" = "The DAG path in orbital handles standalone Softmax layers and Activation('softmax') correctly."
+        "i" = paste(
+          "The DAG path in orbital handles standalone Softmax layers",
+          "and Activation('softmax') correctly."
+        )
       )
     ),
     "log_softmax" = cli::cli_abort(
@@ -143,7 +156,10 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
           "Use a standalone {.cls Activation(\"log_softmax\")} layer",
           "placed after a linear Dense layer."
         ),
-        "i" = "The DAG path in orbital handles standalone Activation layers with softmax/log_softmax correctly."
+        "i" = paste(
+          "The DAG path in orbital handles standalone Activation layers",
+          "with softmax/log_softmax correctly."
+        )
       )
     ),
     # sparsemax normalises like softmax (projects onto the probability simplex)
@@ -187,4 +203,10 @@ build_mlp_pre_act <- function(weight_mat, biases, input_names) {
     },
     character(1)
   )
+}
+
+# Generate a vector of column names for an intermediate layer output.
+# Returns paste0("orbital_", layer_type, "_", lname, "_", suffix, seq_len(n)).
+.orb_col_nms <- function(layer_type, lname, suffix, n) {
+  paste0("orbital_", layer_type, "_", lname, "_", suffix, seq_len(n))
 }

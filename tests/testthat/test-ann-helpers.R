@@ -56,7 +56,7 @@ test_that("activation_expr: selu uses correct scale constants", {
   df <- data.frame(z = c(-2, 0, 1, 2))
   result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
   gamma <- 1.0507009873554805
-  alpha <- 1.6732631921768188
+  alpha <- 1.6732632423543772
   expect_equal(result[3], gamma * 1, tolerance = 1e-7)
   expect_equal(result[4], gamma * 2, tolerance = 1e-7)
   expect_equal(result[1], gamma * alpha * (exp(-2) - 1), tolerance = 1e-7)

@@ -6,6 +6,10 @@
 
 - `orbital()` now supports Keras3 neural networks (Sequential and Functional/DAG models), including dense layers, normalization (Batch/Layer/Instance/Group), pooling (GlobalAveragePooling1D, GlobalMaxPooling1D, AveragePooling1D, MaxPooling1D, GlobalSumPooling1D), merge layers (Add, Concatenate), PReLU, and all standard activation functions. `GlobalSumPooling1D` is a Keras3-native layer with no direct ONNX counterpart; it is not available when translating PyTorch/ONNX models.
 
+## Known limitations
+
+- **`MultiHeadAttention` and `use_causal_mask`**: In Keras 3, `use_causal_mask` is a call-time argument passed to `layer.__call__()` and is **not** stored in the saved layer config. As a result, `orbital()` cannot detect or enforce the causal mask at prediction time. If your model was trained with `use_causal_mask = TRUE`, the orbital translation will produce predictions that ignore the mask (attending to all positions, including future ones). A warning is emitted when `orbital()` encounters a `MultiHeadAttention` layer to draw attention to this limitation.
+
 # orbital 0.5.0
 
 ## New models

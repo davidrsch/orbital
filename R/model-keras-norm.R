@@ -3,8 +3,16 @@
 #  Activation, InstanceNorm, GroupNorm, RMSNorm, Softmax, UnitNorm).
 # Called by orbital_keras_dag_impl() in model-keras.R.
 
-
-.k3_batchnorm <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_batchnorm <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # BatchNormalization: ((x - mean) / sqrt(var + eps)) * gamma + beta
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
@@ -25,7 +33,9 @@
     function(i) {
       xe <- backtick(in_exprs[[i]])
       glue::glue(
-        "(({xe} - {format_numeric(mn[i])}) / sqrt({format_numeric(vr[i])} + {format_numeric(eps)})) * {format_numeric(gamma[i])} + {format_numeric(beta[i])}"
+        "(({xe} - {format_numeric(mn[i])}) /",
+        " sqrt({format_numeric(vr[i])} + {format_numeric(eps)}))",
+        " * {format_numeric(gamma[i])} + {format_numeric(beta[i])}"
       )
     },
     character(1)
@@ -36,7 +46,16 @@
 }
 
 
-.k3_layernorm <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_layernorm <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # LayerNormalization: per-row symbolic mean + var, then normalize
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
@@ -72,7 +91,8 @@
     function(i) {
       xe <- backtick(in_exprs[[i]])
       glue::glue(
-        "(({xe} - `{mean_nm}`) / sqrt(`{var_nm}` + {format_numeric(eps)})) * {format_numeric(gamma[i])} + {format_numeric(beta[i])}"
+        "(({xe} - `{mean_nm}`) / sqrt(`{var_nm}` + {format_numeric(eps)}))",
+        " * {format_numeric(gamma[i])} + {format_numeric(beta[i])}"
       )
     },
     character(1)
@@ -87,7 +107,16 @@
 }
 
 
-.k3_prelu <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_prelu <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # PReLU: per-channel learnable negative slope
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
@@ -113,25 +142,16 @@
 }
 
 
-.k3_dropout_passthru <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
-  # Inference-transparent pass-through layers
-  inbound <- topo_map[[lname]]
-  if (
-    !is.null(inbound) &&
-      length(inbound) >= 1L &&
-      exists(inbound[1L], envir = expr_reg, inherits = FALSE)
-  ) {
-    assign(
-      lname,
-      get(inbound[1L], envir = expr_reg, inherits = FALSE),
-      envir = expr_reg
-    )
-  }
-  invisible(NULL)
-}
-
-
-.k3_leakyrelu <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_leakyrelu <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Standalone LeakyReLU layer (keras.src.layers.activation.leaky_relu.*)
   # Must be checked BEFORE the generic \bactivation\b branch because the
   # module path contains the word "activation".
@@ -161,7 +181,16 @@
 }
 
 
-.k3_elu <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_elu <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Standalone ELU layer (keras.src.layers.activation.elu.ELU).
   # The \belu\b word-boundary pattern does NOT match selu, celu, relu,
   # prelu, or leakyrelu, so this branch is safe to place after leakyrelu.
@@ -191,7 +220,16 @@
 }
 
 
-.k3_relu <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_relu <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Standalone ReLU layer (keras.layers.ReLU()): must be checked BEFORE the
   # generic \bactivation\b branch because the module path contains "activation".
   # Keras ReLU config: negative_slope (default 0), max_value (default NULL),
@@ -219,7 +257,7 @@
     length(mv_raw) > 0L &&
     !is.na(suppressWarnings(as.numeric(mv_raw)[[1L]]))
   mv <- if (mv_finite) as.numeric(mv_raw)[[1L]] else NA_real_
-  unit_names <- paste0("orbital_relu_", lname, "_h", seq_along(in_exprs))
+  unit_names <- .orb_col_nms("relu", lname, "h", length(in_exprs))
   relu_exprs <- vapply(
     in_exprs,
     function(e) {
@@ -251,7 +289,16 @@
 }
 
 
-.k3_activation <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_activation <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Standalone Activation layer: apply activation function to inbound expressions
   # NOTE: must be checked BEFORE the generic softmax branch is unnecessary —
   # the !grepl("softmax") guard prevents Keras3 Softmax() layers (whose class
@@ -367,7 +414,16 @@
 }
 
 
-.k3_instancenorm <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_instancenorm <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # InstanceNormalization: per-row normalize across features (same as LayerNorm for 1D).
   # NOTE: InstanceNormalization is not a standard Keras 3 layer; it is
   # provided by keras_cv. The class path may differ across keras_cv
@@ -407,7 +463,8 @@
     function(i) {
       xe <- backtick(in_exprs[[i]])
       glue::glue(
-        "(({xe} - `{mean_nm}`) / sqrt(`{var_nm}` + {format_numeric(eps)})) * {format_numeric(gamma[i])} + {format_numeric(beta[i])}"
+        "(({xe} - `{mean_nm}`) / sqrt(`{var_nm}` + {format_numeric(eps)}))",
+        " * {format_numeric(gamma[i])} + {format_numeric(beta[i])}"
       )
     },
     character(1)
@@ -422,7 +479,16 @@
 }
 
 
-.k3_groupnorm <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_groupnorm <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # GroupNormalization: normalize within each group of features
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
@@ -468,7 +534,8 @@
       function(i) {
         xe <- backtick(in_exprs[[i]])
         glue::glue(
-          "(({xe} - `{mean_nm}`) / sqrt(`{var_nm}` + {format_numeric(eps)})) * {format_numeric(gamma[i])} + {format_numeric(beta[i])}"
+          "(({xe} - `{mean_nm}`) / sqrt(`{var_nm}` + {format_numeric(eps)}))",
+          " * {format_numeric(gamma[i])} + {format_numeric(beta[i])}"
         )
       },
       character(1)
@@ -556,7 +623,8 @@
             c_idx <- .start + i_local - 1L
             xe <- backtick(.in_exprs[[c_idx]])
             glue::glue(
-              "(({xe} - `{.mean_nm}`) / sqrt(`{.var_nm}` + {format_numeric(.eps)})) * {format_numeric(.gamma[c_idx])} + {format_numeric(.beta[c_idx])}"
+              "(({xe} - `{.mean_nm}`) / sqrt(`{.var_nm}` + {format_numeric(.eps)}))",
+              " * {format_numeric(.gamma[c_idx])} + {format_numeric(.beta[c_idx])}"
             )
           },
           character(1L)
@@ -584,7 +652,8 @@
     assign(lname, unit_nms_all, envir = expr_reg)
   } else {
     cli::cli_abort(c(
-      "Unsupported GroupNormalization configuration in Keras model: {.val {lname}} has {num_groups} groups for {n_feat} features.",
+      "Unsupported GroupNormalization configuration in Keras model: {.val {lname}}.",
+      "i" = "has {num_groups} groups for {n_feat} features.",
       "i" = "num_groups must evenly divide the number of features ({n_feat} %% {num_groups} != 0)."
     ))
   }
@@ -592,7 +661,16 @@
 }
 
 
-.k3_rmsnorm <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_rmsnorm <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # RMSNormalization: per-row normalize using root mean square (no mean subtraction).
   # rms  = sqrt((1/C) * sum_c(x_c^2) + epsilon)
   # y_c  = (x_c / rms) * scale_c
@@ -639,7 +717,16 @@
 }
 
 
-.k3_softmax <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_softmax <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # Standalone Softmax layer: row-wise softmax normalisation (max-stabilised)
   # Subtracting the row-wise max before exp() prevents overflow for large logits
   # and does not change the result (the shift cancels in numerator and denominator).
@@ -694,46 +781,3 @@
   assign(lname, unit_names, envir = expr_reg)
   invisible(NULL)
 }
-
-
-.k3_unitnorm <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
-  # UnitNormalization: L2-normalise each row across all features.
-  # y_i = x_i / sqrt(max(x_1^2 + ... + x_n^2, 1e-7))
-  # Matches Keras 3: keras.backend.epsilon() = 1e-7 (float32 default).
-  # Only axis = -1 (normalise over feature dimension) is supported.
-  unit_axis_raw <- tryCatch(
-    as.integer(unlist(l$get_config()$axis)[[1L]]),
-    error = function(e) -1L
-  )
-  if (is.na(unit_axis_raw)) {
-    unit_axis_raw <- -1L
-  }
-  if (!unit_axis_raw %in% c(-1L, 1L)) {
-    cli::cli_abort(
-      c(
-        "UnitNormalization layer {.val {lname}}: axis = {.val {unit_axis_raw}} is not supported.",
-        "i" = "Only axis = -1 (feature-wise L2 normalisation) is supported by orbital."
-      )
-    )
-  }
-  inbound <- topo_map[[lname]]
-  in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
-  n_feat <- length(in_exprs)
-  expr_bt <- backtick(in_exprs)
-  norm_nm <- paste0("orbital_unitnorm_", lname, "_norm")
-  sq_sum <- paste(paste0(expr_bt, "^2"), collapse = " + ")
-  norm_expr <- paste0("sqrt(do.call(pmax, list(", sq_sum, ", 1e-7)))")
-  unit_names <- paste0("orbital_unitnorm_", lname, "_h", seq_len(n_feat))
-  unit_exprs <- vapply(
-    seq_len(n_feat),
-    function(i) paste0("(", expr_bt[i], " / `", norm_nm, "`)"),
-    character(1L)
-  )
-  state$all_exprs[[lname]] <- c(
-    stats::setNames(norm_expr, norm_nm),
-    stats::setNames(unit_exprs, unit_names)
-  )
-  assign(lname, unit_names, envir = expr_reg)
-  invisible(NULL)
-}
-
