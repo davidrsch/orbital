@@ -156,8 +156,12 @@ activation_expr <- function(
         "dplyr::if_else({x_expr} > {format_numeric(theta)}, {x_expr}, 0)"
       )
     },
-    "softplus" = glue::glue("log(1 + exp({x_expr}))"),
-    "mish" = glue::glue("{x_expr} * tanh(log(1 + exp({x_expr})))"),
+    "softplus" = glue::glue(
+      "dplyr::if_else({x_expr} > 20, {x_expr}, log1p(exp({x_expr})))"
+    ),
+    "mish" = glue::glue(
+      "{x_expr} * tanh(dplyr::if_else({x_expr} > 20, {x_expr}, log1p(exp({x_expr}))))"
+    ),
     "softshrink" = glue::glue(
       "dplyr::if_else({x_expr} > 0.5, {x_expr} - 0.5,",
       " dplyr::if_else({x_expr} < -0.5, {x_expr} + 0.5, 0))"

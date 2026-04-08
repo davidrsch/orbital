@@ -1,4 +1,26 @@
-﻿.k3_bidirectional <- function(
+﻿# Shared masking-detection helper used by LSTM and GRU handlers.
+# Walk topo_map backwards from lname to detect whether any upstream layer
+# is a Keras Masking layer or an Embedding with mask_zero = TRUE.
+# Returns TRUE if masking is active, FALSE otherwise.
+.detect_masking_upstream <- function(lname, topo_map) {
+  visited <- character(0L)
+  to_visit <- topo_map[[lname]] %||% character(0L)
+  while (length(to_visit) > 0L) {
+    nm <- to_visit[[1L]]
+    to_visit <- to_visit[-1L]
+    if (nm %in% visited) {
+      next
+    }
+    visited <- c(visited, nm)
+    if (grepl("^masking", nm, ignore.case = TRUE)) {
+      return(TRUE)
+    }
+    to_visit <- c(to_visit, topo_map[[nm]] %||% character(0L))
+  }
+  FALSE
+}
+
+.k3_bidirectional <- function(
   l,
   lname,
   topo_map,

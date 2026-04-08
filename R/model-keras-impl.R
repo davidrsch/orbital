@@ -86,7 +86,10 @@ orbital_keras_impl <- function(
       "depthwiseconv2d",
       "separableconv2d",
       "2d",
-      "3d"
+      "3d",
+      "gaussiannoise",
+      "activityregularization",
+      "\\bidentity\\b"
     ),
     collapse = "|"
   )

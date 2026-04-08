@@ -35,3 +35,8 @@ namespace_case_when <- function(x) {
   names(x) <- names
   x
 }
+
+# Wrap a variable name in backticks for use in dplyr/SQL expressions
+backtick <- function(x) {
+  paste0("`", x, "`")
+}

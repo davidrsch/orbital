@@ -1,10 +1,5 @@
 # Shared helper functions for classification models
 
-# Helper to backtick variable names for use in expressions
-backtick <- function(x) {
-  paste0("`", x, "`")
-}
-
 # Binary classification from a single probability expression
 # Assumes: eq is P(second level)
 binary_from_prob <- function(eq, type, lvl) {
