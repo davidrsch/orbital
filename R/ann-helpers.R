@@ -29,7 +29,12 @@
   glue::glue("({x_expr}) * 0.5 * (1.0 + ({erf_z}))")
 }
 
-activation_expr <- function(activation, x_expr, alpha = NULL) {
+activation_expr <- function(
+  activation,
+  x_expr,
+  alpha = NULL,
+  layer_class = NULL
+) {
   switch(
     activation,
     "linear" = as.character(x_expr),
@@ -43,13 +48,29 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
     "Tanh" = ,
     "TanhWithDropout" = glue::glue("tanh({x_expr})"),
     "elu" = {
-      a <- if (is.null(alpha)) 1.0 else alpha
+      a <- if (is.null(alpha)) {
+        cli::cli_warn(
+          "elu: alpha not found; using default 1.0.",
+          .class = "orbital_alpha_default"
+        )
+        1.0
+      } else {
+        alpha
+      }
       glue::glue(
         "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * (exp({x_expr}) - 1))"
       )
     },
     "celu" = {
-      a <- if (is.null(alpha)) 1.0 else alpha
+      a <- if (is.null(alpha)) {
+        cli::cli_warn(
+          "celu: alpha not found; using default 1.0.",
+          .class = "orbital_alpha_default"
+        )
+        1.0
+      } else {
+        alpha
+      }
       glue::glue(
         "dplyr::if_else({x_expr} >= 0, {x_expr},",
         " {format_numeric(a)} * (exp({x_expr} / {format_numeric(a)}) - 1))"
@@ -69,6 +90,7 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
     # Exact GELU (default in Keras3 / PyTorch approximate=False):
     # gelu(x) = x * 0.5 * (1 + erf(x/sqrt(2))) via A&S 7.1.28 polynomial.
     "gelu" = .gelu_exact_expr(x_expr),
+    "gelu_exact" = .gelu_exact_expr(x_expr),
     # Tanh-approximation GELU (PyTorch approximate="tanh" / brulee):
     # gelu_approx(x) = x * 0.5 * (1 + tanh(sqrt(2/pi) * (x + 0.044715*x^3)))
     "gelu_approximate" = ,
@@ -97,7 +119,15 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
       " dplyr::if_else({x_expr} >= 3, 1, ({x_expr} + 3) / 6))"
     ),
     "leaky_relu" = {
-      a <- if (is.null(alpha)) 0.01 else alpha
+      a <- if (is.null(alpha)) {
+        cli::cli_warn(
+          "leaky_relu: alpha not found; using default 0.01.",
+          .class = "orbital_alpha_default"
+        )
+        0.01
+      } else {
+        alpha
+      }
       glue::glue(
         "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * {x_expr})"
       )
@@ -113,7 +143,15 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
     "swish" = glue::glue("{x_expr} * (1 / (1 + exp(-({x_expr}))))"),
     "exponential" = glue::glue("exp({x_expr})"),
     "threshold" = {
-      theta <- if (is.null(alpha)) 1.0 else alpha
+      theta <- if (is.null(alpha)) {
+        cli::cli_warn(
+          "threshold: alpha not found; using default 1.0.",
+          .class = "orbital_alpha_default"
+        )
+        1.0
+      } else {
+        alpha
+      }
       glue::glue(
         "dplyr::if_else({x_expr} > {format_numeric(theta)}, {x_expr}, 0)"
       )
@@ -125,6 +163,9 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
       " dplyr::if_else({x_expr} < -0.5, {x_expr} + 0.5, 0))"
     ),
     "softsign" = glue::glue("{x_expr} / (1 + abs({x_expr}))"),
+    "squareplus" = glue::glue(
+      "(({x_expr}) + sqrt(({x_expr}) * ({x_expr}) + 4)) / 2"
+    ),
     "tanhshrink" = glue::glue("{x_expr} - tanh({x_expr})"),
     # NOTE: "softmax" and "log_softmax" are intentionally omitted here.
     # Both functions normalise across *all* units simultaneously and therefore
@@ -173,6 +214,16 @@ activation_expr <- function(activation, x_expr, alpha = NULL) {
           "It requires structural handling similar to softmax."
         )
       )
+    ),
+    "glu" = cli::cli_abort(c(
+      "Activation {.val glu} cannot be applied as a per-unit scalar expression.",
+      "i" = "GLU splits the last dimension and applies element-wise gating; it requires structural handling."
+    )),
+    "sparse_sigmoid" = cli::cli_abort(
+      "Activation {.val sparse_sigmoid} is not supported by orbital."
+    ),
+    "sparse_plus" = cli::cli_abort(
+      "Activation {.val sparse_plus} is not supported by orbital."
     ),
     cli::cli_abort(
       "Activation function {.val {activation}} is not supported by orbital."

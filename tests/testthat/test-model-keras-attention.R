@@ -185,3 +185,40 @@ test_that("keras3 MultiHeadAttention emits causal-mask limitation warning", {
     "use_causal_mask"
   )
 })
+
+# ── MHA kernel layout ambiguity warning (Issue 2) ─────────────────────────────
+
+test_that("keras3 MHA emits orbital_mha_kernel_ambiguous when num_heads == key_dim", {
+  skip_if_no_keras3()
+  k <- reticulate::import("keras")
+  T_len <- 3L
+  C_in <- 8L
+  # num_heads == key_dim triggers the ambiguous layout warning in .make_proj_at()
+  num_heads <- 4L
+  key_dim <- 4L
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$MultiHeadAttention(
+    num_heads = num_heads,
+    key_dim = key_dim
+  )(inp, inp)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, rnorm(n_row), epochs = 2L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  expect_warning(
+    orbital(model, mode = "regression", feature_names = feature_names),
+    class = "orbital_mha_kernel_ambiguous"
+  )
+})

@@ -26,12 +26,12 @@ orbital_keras_impl <- function(
       "\\bdot\\b",
       "\\bsubtract\\b",
       # Normalisation
-      "batchnorm",
-      "layernorm",
-      "instancenorm",
-      "groupnorm",
-      "rmsnormalization",
-      "unitnorm",
+      "\\bbatchnormalization\\b",
+      "\\blayernormalization\\b",
+      "\\binstancenormalization\\b",
+      "\\bgroupnormalization\\b",
+      "\\brmsnormalization\\b",
+      "\\bunitnormalization\\b",
       # Learned activations
       "prelu",
       "leakyrelu",
@@ -55,7 +55,7 @@ orbital_keras_impl <- function(
       "bidirectional",
       "simplernn",
       # Convolution
-      "conv1d",
+      "\\bconv1d\\b",
       "conv1dtranspose",
       "depthwiseconv1d",
       "separableconv1d",
@@ -71,7 +71,8 @@ orbital_keras_impl <- function(
       "repeatvector",
       "\\bembedding\\b",
       "timedistributed",
-      "upsampling1d"
+      "upsampling1d",
+      "\\bmasking\\b"
     ),
     collapse = "|"
   )
@@ -191,5 +192,3 @@ orbital_keras_impl <- function(
     c(hidden_exprs, multiclass_from_logits(logit_exprs, type, lvl))
   }
 }
-
-

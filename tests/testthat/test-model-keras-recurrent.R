@@ -577,3 +577,48 @@ test_that("keras3 Bidirectional(LSTM, merge_mode=None) falls back to concat", {
   orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
   expect_s3_class(orb_obj, "orbital_class")
 })
+
+# ── .detect_masking_upstream unit tests (R-G: masking detection) ─────────────
+
+test_that(".detect_masking_upstream returns TRUE when direct parent is a masking layer", {
+  topo <- list(
+    lstm_1 = "masking",
+    masking = "embedding_1",
+    embedding_1 = character(0L)
+  )
+  expect_true(orbital:::.detect_masking_upstream("lstm_1", topo))
+})
+
+test_that(".detect_masking_upstream returns TRUE when masking layer is two hops upstream", {
+  topo <- list(
+    lstm_1 = "dense_1",
+    dense_1 = "masking",
+    masking = "input_1",
+    input_1 = character(0L)
+  )
+  expect_true(orbital:::.detect_masking_upstream("lstm_1", topo))
+})
+
+test_that(".detect_masking_upstream returns FALSE when no masking layer is upstream", {
+  topo <- list(
+    lstm_1 = "embedding_1",
+    embedding_1 = "input_1",
+    input_1 = character(0L)
+  )
+  expect_false(orbital:::.detect_masking_upstream("lstm_1", topo))
+})
+
+test_that(".detect_masking_upstream returns FALSE for an empty topo_map entry", {
+  topo <- list(lstm_1 = character(0L))
+  expect_false(orbital:::.detect_masking_upstream("lstm_1", topo))
+})
+
+test_that(".detect_masking_upstream returns FALSE for an unknown layer name", {
+  topo <- list(some_layer = "input_1", input_1 = character(0L))
+  expect_false(orbital:::.detect_masking_upstream("nonexistent_layer", topo))
+})
+
+test_that(".detect_masking_upstream is case-insensitive for masking layer prefix", {
+  topo <- list(lstm_1 = "Masking_layer", Masking_layer = character(0L))
+  expect_true(orbital:::.detect_masking_upstream("lstm_1", topo))
+})

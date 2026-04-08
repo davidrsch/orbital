@@ -15,11 +15,6 @@
   last_dense
 ) {
   # GlobalAveragePooling1D: reduce feature columns to their row-wise mean
-  if (grepl("2d|3d", cls)) {
-    cli::cli_abort(
-      "GlobalAveragePooling2D/3D is not supported by orbital (requires spatial aggregation)."
-    )
-  }
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   n_f <- length(in_exprs)
@@ -48,11 +43,6 @@
   last_dense
 ) {
   # GlobalMaxPooling1D: reduce feature columns to their row-wise max
-  if (grepl("2d|3d", cls)) {
-    cli::cli_abort(
-      "GlobalMaxPooling2D/3D is not supported by orbital (requires spatial aggregation)."
-    )
-  }
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   expr_bt <- backtick(in_exprs)
@@ -152,11 +142,6 @@
   # AveragePooling1D: sliding-window mean across time steps.
   # Input layout: time-step major (T_in × C_feat) — in_exprs[(t-1)*C_feat + c]
   # for 1-indexed timestep t and 1-indexed channel c.
-  if (grepl("2d|3d", cls)) {
-    cli::cli_abort(
-      "AveragePooling2D/3D is not supported by orbital (requires spatial aggregation)."
-    )
-  }
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   n_f <- length(in_exprs)
@@ -310,11 +295,6 @@
   # MaxPooling1D: sliding-window max across time steps.
   # Input layout: time-step major (T_in × C_feat) — in_exprs[(t-1)*C_feat + c]
   # for 1-indexed timestep t and 1-indexed channel c.
-  if (grepl("2d|3d", cls)) {
-    cli::cli_abort(
-      "MaxPooling2D/3D is not supported by orbital (requires spatial aggregation)."
-    )
-  }
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   n_f <- length(in_exprs)
@@ -403,11 +383,6 @@
   # code for stock Keras 3 models. If you are using keras_cv, verify that
   # the class name it produces contains "globalsumpooling"; otherwise this
   # branch will never be reached.
-  if (grepl("2d|3d", cls)) {
-    cli::cli_abort(
-      "GlobalSumPooling2D/3D is not supported by orbital (requires spatial aggregation)."
-    )
-  }
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   expr_bt <- backtick(in_exprs)

@@ -29,7 +29,7 @@ test_that("activation_expr: tanh produces correct values", {
 })
 
 test_that("activation_expr: elu is identity for positive inputs", {
-  expr <- activation_expr("elu", "z")
+  expr <- suppressWarnings(activation_expr("elu", "z"))
   expect_match(expr, "if_else")
   df <- data.frame(z = c(-1, 0, 1, 2))
   result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
@@ -39,7 +39,7 @@ test_that("activation_expr: elu is identity for positive inputs", {
 })
 
 test_that("activation_expr: celu is identity for positive inputs", {
-  expr <- activation_expr("celu", "z")
+  expr <- suppressWarnings(activation_expr("celu", "z"))
   expect_match(expr, "if_else")
   df <- data.frame(z = c(-1, 0, 2))
   result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
@@ -116,7 +116,7 @@ test_that("activation_expr: hard_swish (Keras3) correct values", {
 })
 
 test_that("activation_expr: leaky_relu uses correct negative slope", {
-  expr <- activation_expr("leaky_relu", "z")
+  expr <- suppressWarnings(activation_expr("leaky_relu", "z"))
   expect_match(expr, "0.01|if_else")
   df <- data.frame(z = c(-2, 0, 2))
   result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
@@ -283,7 +283,7 @@ test_that("activation_expr: exponential returns exp(x)", {
 })
 
 test_that("activation_expr: threshold zeroes values at or below threshold", {
-  expr <- activation_expr("threshold", "z")
+  expr <- suppressWarnings(activation_expr("threshold", "z"))
   # Default threshold = 1.0, default value = 0
   expect_match(expr, "if_else")
   df <- data.frame(z = c(-1, 0, 1, 1.5, 2))
@@ -308,4 +308,75 @@ test_that("activation_expr: hard_silu is alias for hard_swish", {
   r_hard_silu <- dplyr::mutate(df, r = !!rlang::parse_expr(expr_hard_silu))$r
   r_hard_swish <- dplyr::mutate(df, r = !!rlang::parse_expr(expr_hard_swish))$r
   expect_equal(r_hard_silu, r_hard_swish, tolerance = 1e-8)
+})
+
+# ── alpha fallback warnings (R-A: cli_warn hardening) ────────────────────────
+
+test_that("activation_expr: elu warns with orbital_alpha_default when alpha is NULL", {
+  expect_warning(
+    activation_expr("elu", "z", alpha = NULL),
+    class = "orbital_alpha_default"
+  )
+})
+
+test_that("activation_expr: elu uses default alpha 1.0 when alpha is NULL", {
+  expr <- suppressWarnings(activation_expr("elu", "z", alpha = NULL))
+  df <- data.frame(z = c(-1, 0, 1))
+  result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
+  # default alpha = 1.0: elu(-1) = exp(-1) - 1
+  expect_equal(result[1], exp(-1) - 1, tolerance = 1e-8)
+  expect_equal(result[3], 1, tolerance = 1e-8)
+})
+
+test_that("activation_expr: elu does not warn when alpha is provided", {
+  expect_no_warning(activation_expr("elu", "z", alpha = 0.5))
+})
+
+test_that("activation_expr: celu warns with orbital_alpha_default when alpha is NULL", {
+  expect_warning(
+    activation_expr("celu", "z", alpha = NULL),
+    class = "orbital_alpha_default"
+  )
+})
+
+test_that("activation_expr: celu does not warn when alpha is provided", {
+  expect_no_warning(activation_expr("celu", "z", alpha = 1.0))
+})
+
+test_that("activation_expr: leaky_relu warns with orbital_alpha_default when alpha is NULL", {
+  expect_warning(
+    activation_expr("leaky_relu", "z", alpha = NULL),
+    class = "orbital_alpha_default"
+  )
+})
+
+test_that("activation_expr: leaky_relu default alpha 0.01 gives correct values", {
+  expr <- suppressWarnings(activation_expr("leaky_relu", "z", alpha = NULL))
+  df <- data.frame(z = c(-2, 0, 2))
+  result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
+  expect_equal(result[1], -0.02, tolerance = 1e-8)
+  expect_equal(result[3], 2, tolerance = 1e-8)
+})
+
+test_that("activation_expr: leaky_relu does not warn when alpha is provided", {
+  expect_no_warning(activation_expr("leaky_relu", "z", alpha = 0.2))
+})
+
+test_that("activation_expr: threshold warns with orbital_alpha_default when alpha is NULL", {
+  expect_warning(
+    activation_expr("threshold", "z", alpha = NULL),
+    class = "orbital_alpha_default"
+  )
+})
+
+test_that("activation_expr: threshold default alpha 1.0 gives correct values", {
+  expr <- suppressWarnings(activation_expr("threshold", "z", alpha = NULL))
+  df <- data.frame(z = c(-1, 1, 1.5, 2))
+  result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
+  # x > 1.0 passes through; x <= 1.0 → 0
+  expect_equal(result, c(0, 0, 1.5, 2))
+})
+
+test_that("activation_expr: threshold does not warn when alpha is provided", {
+  expect_no_warning(activation_expr("threshold", "z", alpha = 2.0))
 })

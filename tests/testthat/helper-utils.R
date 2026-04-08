@@ -8,6 +8,11 @@ skip_if_no_keras3 <- function() {
   )
 }
 
+## Alias used in newer test files (equivalent to skip_if_no_keras3)
+.keras_skip <- function() {
+  skip_if_no_keras3()
+}
+
 ## For sparklyr testing
 
 testthat_tbl <- function(name, data = NULL, repartition = 0L) {

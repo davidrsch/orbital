@@ -132,6 +132,16 @@ orbital_keras_dag_impl <- function(
       character(1L)
     ))
   } else {
+    cli::cli_warn(
+      c(
+        paste0(
+          "Could not determine output layer names from model config; ",
+          "falling back to last Dense layer ({.val {last_dense}})."
+        ),
+        "i" = "For multi-output models, verify that predictions are correct."
+      ),
+      .class = "orbital_output_fallback"
+    )
     last_dense # fallback: treat last Dense as the single output
   }
 
@@ -331,6 +341,12 @@ orbital_keras_dag_impl <- function(
         output_layer_names,
         last_dense
       )
+    } else if (grepl("\\bmasking\\b", cls, perl = TRUE)) {
+      # Masking layer: pass expressions through unchanged.
+      # Masking metadata (the mask itself) cannot be expressed in pure SQL.
+      inbound_m <- topo_map[[lname]]
+      in_exprs_m <- get(inbound_m[1L], envir = expr_reg, inherits = FALSE)
+      assign(lname, in_exprs_m, envir = expr_reg)
     } else if (grepl("leakyrelu", cls)) {
       .k3_leakyrelu(
         l,
@@ -778,7 +794,11 @@ orbital_keras_dag_impl <- function(
         } else {
           "No output layer names could be resolved from the model config."
         },
-        "i" = "orbital requires the final output layer to be a Dense (or EinsumDense) layer. Standalone Activation, Softmax, or BatchNormalization output layers are not supported as the last layer."
+        "i" = paste0(
+          "orbital requires the final output layer to be a Dense (or EinsumDense) layer.",
+          " Standalone Activation, Softmax, or BatchNormalization output layers",
+          " are not supported as the last layer."
+        )
       )
     )
   }

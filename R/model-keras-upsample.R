@@ -1,17 +1,19 @@
 # Handler for the UpSampling1D layer.
 # Called by orbital_keras_dag_impl() in model-keras-dag.R.
 
-
-
-.k3_upsampling1d <- function(l, lname, topo_map, expr_reg, state, weight_map, output_layer_names, last_dense) {
+.k3_upsampling1d <- function(
+  l,
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  weight_map,
+  output_layer_names,
+  last_dense
+) {
   # UpSampling1D: repeat each time-step `size` times.
   # Input layout: time-step major (T_in × C_feat).
   # Output: T_out = T_in * size timesteps, same C_feat channels.
-  if (grepl("2d|3d", cls)) {
-    cli::cli_abort(
-      "UpSampling2D/3D is not supported by orbital (requires spatial replication)."
-    )
-  }
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   n_f <- length(in_exprs)

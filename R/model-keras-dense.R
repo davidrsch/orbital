@@ -62,19 +62,24 @@
     n_out <- ncol(kern)
     bias_use <- if (is.null(bias_v_raw)) numeric(n_out) else bias_v_raw
     pre_act <- build_mlp_pre_act(t(kern), bias_use, in_exprs)
-    act_exprs <- vapply(
-      pre_act,
-      function(z) activation_expr(activation, z, alpha = act_alpha),
-      character(1L)
-    )
-    unit_names <- paste0(
-      "orbital_einsumdense_",
-      lname,
-      "_h",
-      seq_along(act_exprs)
-    )
-    state$all_exprs[[lname]] <- stats::setNames(act_exprs, unit_names)
-    assign(lname, unit_names, envir = expr_reg)
+    if (lname %in% output_layer_names) {
+      state$out_pre_act_map[[lname]] <- pre_act
+      if (lname == last_dense) state$out_pre_act <- pre_act
+    } else {
+      act_exprs <- vapply(
+        pre_act,
+        function(z) activation_expr(activation, z, alpha = act_alpha),
+        character(1L)
+      )
+      unit_names <- paste0(
+        "orbital_einsumdense_",
+        lname,
+        "_h",
+        seq_along(act_exprs)
+      )
+      state$all_exprs[[lname]] <- stats::setNames(act_exprs, unit_names)
+      assign(lname, unit_names, envir = expr_reg)
+    }
   } else if (equation == "abc,cd->abd") {
     # Time-distributed Dense: kernel (C, D); apply per spatial position.
     C_last <- nrow(kern)
@@ -84,9 +89,11 @@
     k_T <- t(kern) # (D_out, C_last) for build_mlp_pre_act
     out_nms <- character(0L)
     out_exprs <- character(0L)
+    all_pre_acts <- character(0L)
     for (p in seq_len(T_len)) {
       in_slice <- in_exprs[((p - 1L) * C_last + 1L):(p * C_last)]
       pre_act <- build_mlp_pre_act(k_T, bias_use, in_slice)
+      all_pre_acts <- c(all_pre_acts, pre_act)
       ae <- vapply(
         pre_act,
         function(z) activation_expr(activation, z, alpha = act_alpha),
@@ -103,8 +110,13 @@
       out_nms <- c(out_nms, nms)
       out_exprs <- c(out_exprs, ae)
     }
-    state$all_exprs[[lname]] <- stats::setNames(out_exprs, out_nms)
-    assign(lname, out_nms, envir = expr_reg)
+    if (lname %in% output_layer_names) {
+      state$out_pre_act_map[[lname]] <- all_pre_acts
+      if (lname == last_dense) state$out_pre_act <- all_pre_acts
+    } else {
+      state$all_exprs[[lname]] <- stats::setNames(out_exprs, out_nms)
+      assign(lname, out_nms, envir = expr_reg)
+    }
   } else {
     cli::cli_abort(c(
       "EinsumDense layer {.val {lname}}: equation {.val {equation}} is not supported by orbital.",

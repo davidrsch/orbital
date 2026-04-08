@@ -63,8 +63,18 @@
   D_q <- if (!is.null(in_shape_q) && length(in_shape_q) >= 1L) {
     tail(in_shape_q[!is.na(in_shape_q)], 1L)
   } else {
-    # Fallback: assume square — length = T^2 or T * D; try sqrt
-    as.integer(sqrt(length(q_exprs)))
+    # Fallback: input spec unavailable; attempt sqrt inference.
+    sq <- sqrt(length(q_exprs))
+    if (abs(sq - round(sq)) > .Machine$double.eps^0.5) {
+      cli::cli_abort(
+        c(
+          "Attention {.val {lname}}: cannot determine query depth D from model input spec.",
+          "x" = "{.code sqrt({length(q_exprs)})} = {sq} is not an integer.",
+          "i" = "Ensure the layer is built with an explicit input shape in a Keras Functional model."
+        )
+      )
+    }
+    as.integer(round(sq))
   }
   T_q <- as.integer(length(q_exprs) / D_q)
 
@@ -426,5 +436,3 @@
   assign(lname, att_out_nms_aa, envir = expr_reg)
   invisible(NULL)
 }
-
-
