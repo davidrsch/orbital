@@ -12,7 +12,7 @@
       next
     }
     visited <- c(visited, nm)
-    if (grepl("^masking", nm, ignore.case = TRUE)) {
+    if (grepl("masking", nm, ignore.case = TRUE)) {
       return(TRUE)
     }
     to_visit <- c(to_visit, topo_map[[nm]] %||% character(0L))

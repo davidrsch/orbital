@@ -26,7 +26,12 @@
     ul_I <- nrow(ul_kernel)
     ul_T <- as.integer(length(ul_in_exprs) / ul_I)
     ul_bias <- if (length(ul_wts) >= 3L) {
-      as.numeric(ul_wts[[3L]])
+      raw_bias <- ul_wts[[3L]] # may be (2, 4H) matrix or flat vector
+      if (is.matrix(raw_bias) && nrow(raw_bias) == 2L) {
+        colSums(raw_bias)
+      } else {
+        as.numeric(raw_bias)
+      }
     } else {
       numeric(4L * ul_H)
     }
@@ -86,7 +91,17 @@
       C_exprs_t <- if (is.null(C_prev)) {
         paste0("(", a_input, " * ", a_cell, ")")
       } else {
-        paste0("(", a_forget, " * ", backtick(C_prev), " + ", a_input, " * ", a_cell, ")")
+        paste0(
+          "(",
+          a_forget,
+          " * ",
+          backtick(C_prev),
+          " + ",
+          a_input,
+          " * ",
+          a_cell,
+          ")"
+        )
       }
       H_nms <- paste0(ul_pfx, "_H_t", t, "_h", seq_len(ul_H))
       H_exprs_t <- paste0("(", a_output, " * tanh(", backtick(C_nms), "))")
@@ -283,5 +298,3 @@
     )
   }
 }
-
-

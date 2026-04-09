@@ -298,9 +298,28 @@
             "_h",
             seq_along(in_exprs)
         )
+        act_alpha <- if (is.list(act_cfg) && !is.null(act_cfg[["config"]])) {
+            act_cfg[["config"]][["alpha"]]
+        } else {
+            NULL
+        }
+        act_default_value <- if (
+            is.list(act_cfg) && !is.null(act_cfg[["config"]])
+        ) {
+            act_cfg[["config"]][["default_value"]] %||% 0
+        } else {
+            0
+        }
         act_exprs <- vapply(
             in_exprs,
-            function(e) activation_expr(activation, e),
+            function(e) {
+                activation_expr(
+                    activation,
+                    e,
+                    alpha = act_alpha,
+                    default_value = act_default_value
+                )
+            },
             character(1)
         )
         state$all_exprs[[lname]] <- stats::setNames(act_exprs, unit_names)

@@ -98,9 +98,9 @@ test_that("activation_expr: hardsigmoid (PyTorch ±3 clamp) correct values", {
   expect_equal(result, c(0, 0, 0.5, 1, 1), tolerance = 1e-8)
 })
 
-test_that("activation_expr: hard_sigmoid (Keras3 ±2.5 clamp) correct values", {
+test_that("activation_expr: hard_sigmoid (Keras3 ±3 clamp) correct values", {
   expr <- activation_expr("hard_sigmoid", "z")
-  df <- data.frame(z = c(-3, -2.5, 0, 2.5, 3))
+  df <- data.frame(z = c(-4, -3, 0, 3, 4))
   result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
   expect_equal(result, c(0, 0, 0.5, 1, 1), tolerance = 1e-8)
 })
@@ -379,4 +379,75 @@ test_that("activation_expr: threshold default alpha 1.0 gives correct values", {
 
 test_that("activation_expr: threshold does not warn when alpha is provided", {
   expect_no_warning(activation_expr("threshold", "z", alpha = 2.0))
+})
+
+# ── Wave 1A regression: hard_sigmoid formula fix ──────────────────────────────
+
+test_that("hard_sigmoid and hardsigmoid produce identical expression strings (Wave 1A regression)", {
+  expr_hs <- activation_expr("hard_sigmoid", "z")
+  expr_hsi <- activation_expr("hardsigmoid", "z")
+  expect_equal(expr_hs, expr_hsi)
+})
+
+test_that("hard_sigmoid uses ±3 clamp and x/6 slope — old ±2.5/0.2*x constants absent (Wave 1A regression)", {
+  expr <- activation_expr("hard_sigmoid", "z")
+  # New constants must be present
+  expect_true(grepl("/ 6", expr, fixed = TRUE))
+  expect_true(grepl("0.5", expr, fixed = TRUE))
+  # Old wrong constants must NOT appear
+  expect_false(grepl("2\\.5", expr))
+  expect_false(grepl("0\\.2", expr))
+})
+
+test_that("hard_sigmoid numerical values match ±3 clamp spec at all critical points (Wave 1A regression)", {
+  expr <- activation_expr("hard_sigmoid", "z")
+  zvals <- c(-4, -3, -1.5, 0, 1.5, 3, 4)
+  df <- data.frame(z = zvals)
+  result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
+  # z <= -3 → 0, z >= 3 → 1, otherwise x/6 + 0.5
+  expected <- ifelse(zvals <= -3, 0, ifelse(zvals >= 3, 1, zvals / 6 + 0.5))
+  expect_equal(result, expected, tolerance = 1e-8)
+})
+
+# ── Wave 1A regression: activation name aliases ────────────────────────────────
+
+test_that("hard_shrink is an alias for hardshrink — produces identical expression (Wave 1A regression)", {
+  expect_equal(
+    activation_expr("hard_shrink", "z"),
+    activation_expr("hardshrink", "z")
+  )
+})
+
+test_that("soft_shrink is an alias for softshrink — produces identical expression (Wave 1A regression)", {
+  expect_equal(
+    activation_expr("soft_shrink", "z"),
+    activation_expr("softshrink", "z")
+  )
+})
+
+test_that("tanh_shrink is an alias for tanhshrink — produces identical expression (Wave 1A regression)", {
+  expect_equal(
+    activation_expr("tanh_shrink", "z"),
+    activation_expr("tanhshrink", "z")
+  )
+})
+
+# ── Wave 1A regression: threshold default_value parameter ─────────────────────
+
+test_that("threshold with default_value=-1.5 embeds -1.5 in expression (Wave 1A regression)", {
+  expr <- activation_expr("threshold", "z", alpha = 0.5, default_value = -1.5)
+  expect_true(grepl("-1.5", expr, fixed = TRUE))
+  # Numerically: z > 0.5 → z, else -1.5
+  df <- data.frame(z = c(0, 0.5, 1, 2))
+  result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
+  expect_equal(result, c(-1.5, -1.5, 1, 2), tolerance = 1e-8)
+})
+
+test_that("threshold default_value=0 matches the no-default-value call (Wave 1A regression)", {
+  expr0 <- activation_expr("threshold", "z", alpha = 1.0, default_value = 0)
+  exprDflt <- suppressWarnings(activation_expr("threshold", "z"))
+  df <- data.frame(z = c(-1, 0, 0.5, 1, 2))
+  r0 <- dplyr::mutate(df, r = !!rlang::parse_expr(expr0))$r
+  rD <- dplyr::mutate(df, r = !!rlang::parse_expr(exprDflt))$r
+  expect_equal(r0, rD, tolerance = 1e-9)
 })

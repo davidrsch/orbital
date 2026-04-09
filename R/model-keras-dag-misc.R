@@ -77,9 +77,10 @@
       }
     }
   } else {
-    cli::cli_abort(
-      "Keras Permute layer {.val {lname}}: unsupported dims {paste(dims, collapse=',')}. Only (1,2) and (2,1) are supported."
-    )
+    cli::cli_abort(c(
+      "Keras Permute layer {.val {lname}}: unsupported dims {paste(dims, collapse=',')}.",
+      "i" = "Only (1,2) and (2,1) are supported."
+    ))
   }
   perm_out_nms <- paste0(
     "orbital_permute_",

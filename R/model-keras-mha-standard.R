@@ -103,22 +103,18 @@
     )
   }
 
-  # Causal-mask limitation: use_causal_mask is a call-time argument in Keras 3
-  # and is not stored in the layer config.  orbital cannot enforce or detect it,
-  # so predictions for models trained with use_causal_mask=TRUE will be incorrect.
-  cli::cli_warn(
-    c(
+  # Causal-mask limitation: use_causal_mask cannot be expressed as a static
+  # SQL expression; abort immediately to prevent silent incorrect predictions.
+  cfg_main <- tryCatch(l$get_config(), error = function(e) list())
+  if (isTRUE(as.logical(cfg_main$use_causal_mask %||% FALSE))) {
+    cli::cli_abort(
       paste0(
-        "MultiHeadAttention {.val {lname}}: {.code use_causal_mask} is a ",
-        "call-time argument in Keras 3 and is not saved in the layer config."
-      ),
-      "i" = paste0(
-        "If this layer was called with {.code use_causal_mask = TRUE}, ",
-        "orbital cannot enforce the causal mask and predictions will be incorrect."
-      ),
-      "i" = "See {.code NEWS.md} for details."
+        "MultiHeadAttention layer has `use_causal_mask = TRUE`: causal masking ",
+        "cannot be expressed as a static SQL expression. Refactor the model to ",
+        "remove causal masking before calling orbital()."
+      )
     )
-  )
+  }
 
   # Determine weight accessor functions given that Keras3 EinsumDense stores
   # Q/K kernels as 3-D arrays.  Two known layouts:

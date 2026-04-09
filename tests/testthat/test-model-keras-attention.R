@@ -152,7 +152,7 @@ test_that("keras3 GroupedQueryAttention (GQA) predictions match keras3 predict",
 
 # ── MHA causal-mask warning ───────────────────────────────────────────────────
 
-test_that("keras3 MultiHeadAttention emits causal-mask limitation warning", {
+test_that("keras3 MultiHeadAttention without causal mask translates successfully (Wave 1A: no unconditional warning)", {
   skip_if_no_keras3()
   k <- reticulate::import("keras")
   T_len <- 3L
@@ -180,10 +180,10 @@ test_that("keras3 MultiHeadAttention emits causal-mask limitation warning", {
   model$fit(x_3d, rnorm(n_row), epochs = 2L, verbose = 0L)
 
   feature_names <- paste0("x", seq_len(T_len * C_in))
-  expect_warning(
-    orbital(model, mode = "regression", feature_names = feature_names),
-    "use_causal_mask"
-  )
+  # Wave 1A: unconditional use_causal_mask warning was removed.
+  # use_causal_mask=FALSE (default) should translate successfully with no error.
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  expect_s3_class(orb_obj, "orbital_class")
 })
 
 # ── MHA kernel layout ambiguity warning (Issue 2) ─────────────────────────────
@@ -220,5 +220,33 @@ test_that("keras3 MHA emits orbital_mha_kernel_ambiguous when num_heads == key_d
   expect_warning(
     orbital(model, mode = "regression", feature_names = feature_names),
     class = "orbital_mha_kernel_ambiguous"
+  )
+})
+
+# ── Wave 1A regression: use_causal_mask=TRUE now aborts (not warns) ───────────
+
+test_that("keras3 MultiHeadAttention with use_causal_mask=TRUE raises error (Wave 1A regression)", {
+  skip_if_no_keras3()
+  k <- reticulate::import("keras")
+  T_len <- 4L
+  C_in <- 8L
+  num_heads <- 2L
+  key_dim <- 4L
+
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$MultiHeadAttention(
+    num_heads = num_heads,
+    key_dim = key_dim,
+    use_causal_mask = TRUE
+  )(inp, inp)
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  # Wave 1A fix: cli_abort (not cli_warn) when use_causal_mask=TRUE
+  expect_error(
+    orbital(model, mode = "regression", feature_names = feature_names),
+    "use_causal_mask"
   )
 })

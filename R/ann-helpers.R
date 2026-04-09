@@ -33,7 +33,8 @@ activation_expr <- function(
   activation,
   x_expr,
   alpha = NULL,
-  layer_class = NULL
+  layer_class = NULL,
+  default_value = 0
 ) {
   switch(
     activation,
@@ -97,6 +98,7 @@ activation_expr <- function(
     "gelu_tanh" = glue::glue(
       "{x_expr} * 0.5 * (1 + tanh(({x_expr} + 0.044715 * {x_expr}^3) * 0.7978845608028654))"
     ),
+    "hard_shrink" = ,
     "hardshrink" = glue::glue(
       "dplyr::if_else(abs({x_expr}) > 0.5, {x_expr}, 0)"
     ),
@@ -104,10 +106,9 @@ activation_expr <- function(
     "hardsigmoid" = glue::glue(
       "dplyr::if_else({x_expr} <= -3, 0, dplyr::if_else({x_expr} >= 3, 1, {x_expr} / 6 + 0.5))"
     ),
-    # Keras3 hard_sigmoid: clamp x to [-2.5, 2.5], then 0.2*x + 0.5
+    # Keras 3 hard_sigmoid: clamp to [-3, 3], then x/6 + 0.5 (alias for hardsigmoid)
     "hard_sigmoid" = glue::glue(
-      "dplyr::if_else({x_expr} <= -2.5, 0,",
-      " dplyr::if_else({x_expr} >= 2.5, 1, 0.2 * {x_expr} + 0.5))"
+      "dplyr::if_else({x_expr} <= -3, 0, dplyr::if_else({x_expr} >= 3, 1, {x_expr} / 6 + 0.5))"
     ),
     "hardtanh" = glue::glue(
       "dplyr::if_else({x_expr} < -1, -1, dplyr::if_else({x_expr} > 1, 1, {x_expr}))"
@@ -153,7 +154,7 @@ activation_expr <- function(
         alpha
       }
       glue::glue(
-        "dplyr::if_else({x_expr} > {format_numeric(theta)}, {x_expr}, 0)"
+        "dplyr::if_else({x_expr} > {format_numeric(theta)}, {x_expr}, {format_numeric(default_value)})"
       )
     },
     "softplus" = glue::glue(
@@ -162,6 +163,7 @@ activation_expr <- function(
     "mish" = glue::glue(
       "{x_expr} * tanh(dplyr::if_else({x_expr} > 20, {x_expr}, log1p(exp({x_expr}))))"
     ),
+    "soft_shrink" = ,
     "softshrink" = glue::glue(
       "dplyr::if_else({x_expr} > 0.5, {x_expr} - 0.5,",
       " dplyr::if_else({x_expr} < -0.5, {x_expr} + 0.5, 0))"
@@ -170,6 +172,7 @@ activation_expr <- function(
     "squareplus" = glue::glue(
       "(({x_expr}) + sqrt(({x_expr}) * ({x_expr}) + 4)) / 2"
     ),
+    "tanh_shrink" = ,
     "tanhshrink" = glue::glue("{x_expr} - tanh({x_expr})"),
     # NOTE: "softmax" and "log_softmax" are intentionally omitted here.
     # Both functions normalise across *all* units simultaneously and therefore

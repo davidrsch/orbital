@@ -2,6 +2,53 @@
 # Maximum, Minimum, Subtract, Dot, Concatenate).
 # Called by orbital_keras_dag_impl() in model-keras.R.
 
+.k3_elementwise_merge <- function(
+  lname,
+  topo_map,
+  expr_reg,
+  state,
+  layer_type,
+  expr_fn
+) {
+  # Shared logic for element-wise merge layers (Add, Multiply, Average,
+  # Maximum, Minimum). Each public handler is a thin wrapper that supplies
+  # layer_type (for error messages) and expr_fn (expression builder).
+  inbound <- topo_map[[lname]]
+  if (is.null(inbound) || length(inbound) < 2L) {
+    cli::cli_abort(c(
+      "Keras {layer_type} layer {.val {lname}} must have at least 2 inbound inputs.",
+      "i" = "got {length(inbound)}"
+    ))
+  }
+  all_inbound_exprs <- lapply(inbound, function(nm) {
+    get(nm, envir = expr_reg, inherits = FALSE)
+  })
+  widths <- lengths(all_inbound_exprs)
+  if (length(unique(widths)) != 1L) {
+    cli::cli_abort(c(
+      "Keras {layer_type} layer {.val {lname}}: all inputs must have the same width.",
+      "i" = "got: {paste(widths, collapse = ', ')}"
+    ))
+  }
+  out_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
+  out_exprs <- vapply(
+    seq_len(widths[1L]),
+    function(i) {
+      terms <- vapply(
+        all_inbound_exprs,
+        function(e) backtick(e[i]),
+        character(1L)
+      )
+      expr_fn(terms)
+    },
+    character(1L)
+  )
+  state$all_exprs[[lname]] <- stats::setNames(out_exprs, out_names)
+  assign(lname, out_names, envir = expr_reg)
+  invisible(NULL)
+}
+
+
 .k3_add <- function(
   l,
   lname,
@@ -13,38 +60,14 @@
   last_dense
 ) {
   # Element-wise Add: supports skip / residual connections (>=2 inputs)
-  inbound <- topo_map[[lname]]
-  if (is.null(inbound) || length(inbound) < 2L) {
-    cli::cli_abort(
-      "Keras Add layer {.val {lname}} must have at least 2 inbound inputs, got {length(inbound)}."
-    )
-  }
-  all_inbound_exprs <- lapply(inbound, function(nm) {
-    get(nm, envir = expr_reg, inherits = FALSE)
-  })
-  widths <- lengths(all_inbound_exprs)
-  if (length(unique(widths)) != 1L) {
-    cli::cli_abort(c(
-      "Keras Add layer {.val {lname}}: all inputs must have the same width.",
-      "i" = "got: {paste(widths, collapse = ', ')}"
-    ))
-  }
-  add_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
-  add_exprs <- vapply(
-    seq_len(widths[1L]),
-    function(i) {
-      terms <- vapply(
-        all_inbound_exprs,
-        function(e) backtick(e[i]),
-        character(1L)
-      )
-      paste0("(", paste(terms, collapse = " + "), ")")
-    },
-    character(1L)
+  .k3_elementwise_merge(
+    lname,
+    topo_map,
+    expr_reg,
+    state,
+    "Add",
+    function(terms) paste0("(", paste(terms, collapse = " + "), ")")
   )
-  state$all_exprs[[lname]] <- stats::setNames(add_exprs, add_names)
-  assign(lname, add_names, envir = expr_reg)
-  invisible(NULL)
 }
 
 
@@ -59,39 +82,14 @@
   last_dense
 ) {
   # Element-wise Multiply: element-wise product of >=2 inputs
-  inbound <- topo_map[[lname]]
-  if (is.null(inbound) || length(inbound) < 2L) {
-    cli::cli_abort(c(
-      "Keras Multiply layer {.val {lname}} must have at least 2 inbound inputs.",
-      "i" = "got {length(inbound)}"
-    ))
-  }
-  all_inbound_exprs <- lapply(inbound, function(nm) {
-    get(nm, envir = expr_reg, inherits = FALSE)
-  })
-  widths <- lengths(all_inbound_exprs)
-  if (length(unique(widths)) != 1L) {
-    cli::cli_abort(c(
-      "Keras Multiply layer {.val {lname}}: all inputs must have the same width.",
-      "i" = "got: {paste(widths, collapse = ', ')}"
-    ))
-  }
-  mul_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
-  mul_exprs <- vapply(
-    seq_len(widths[1L]),
-    function(i) {
-      terms <- vapply(
-        all_inbound_exprs,
-        function(e) backtick(e[i]),
-        character(1L)
-      )
-      paste0("(", paste(terms, collapse = " * "), ")")
-    },
-    character(1L)
+  .k3_elementwise_merge(
+    lname,
+    topo_map,
+    expr_reg,
+    state,
+    "Multiply",
+    function(terms) paste0("(", paste(terms, collapse = " * "), ")")
   )
-  state$all_exprs[[lname]] <- stats::setNames(mul_exprs, mul_names)
-  assign(lname, mul_names, envir = expr_reg)
-  invisible(NULL)
 }
 
 
@@ -106,46 +104,22 @@
   last_dense
 ) {
   # Element-wise Average: mean of >=2 inputs
-  inbound <- topo_map[[lname]]
-  if (is.null(inbound) || length(inbound) < 2L) {
-    cli::cli_abort(c(
-      "Keras Average layer {.val {lname}} must have at least 2 inbound inputs.",
-      "i" = "got {length(inbound)}"
-    ))
-  }
-  all_inbound_exprs <- lapply(inbound, function(nm) {
-    get(nm, envir = expr_reg, inherits = FALSE)
-  })
-  widths <- lengths(all_inbound_exprs)
-  if (length(unique(widths)) != 1L) {
-    cli::cli_abort(c(
-      "Keras Average layer {.val {lname}}: all inputs must have the same width.",
-      "i" = "got: {paste(widths, collapse = ', ')}"
-    ))
-  }
-  n_inputs <- length(inbound)
-  avg_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
-  avg_exprs <- vapply(
-    seq_len(widths[1L]),
-    function(i) {
-      terms <- vapply(
-        all_inbound_exprs,
-        function(e) backtick(e[i]),
-        character(1L)
-      )
+  .k3_elementwise_merge(
+    lname,
+    topo_map,
+    expr_reg,
+    state,
+    "Average",
+    function(terms) {
       paste0(
         "((",
         paste(terms, collapse = " + "),
         ") / ",
-        format_numeric(n_inputs),
+        format_numeric(length(terms)),
         ")"
       )
-    },
-    character(1L)
+    }
   )
-  state$all_exprs[[lname]] <- stats::setNames(avg_exprs, avg_names)
-  assign(lname, avg_names, envir = expr_reg)
-  invisible(NULL)
 }
 
 
@@ -160,39 +134,14 @@
   last_dense
 ) {
   # Element-wise Maximum: per-element max over >=2 inputs
-  inbound <- topo_map[[lname]]
-  if (is.null(inbound) || length(inbound) < 2L) {
-    cli::cli_abort(c(
-      "Keras Maximum layer {.val {lname}} must have at least 2 inbound inputs.",
-      "i" = "got {length(inbound)}"
-    ))
-  }
-  all_inbound_exprs <- lapply(inbound, function(nm) {
-    get(nm, envir = expr_reg, inherits = FALSE)
-  })
-  widths <- lengths(all_inbound_exprs)
-  if (length(unique(widths)) != 1L) {
-    cli::cli_abort(c(
-      "Keras Maximum layer {.val {lname}}: all inputs must have the same width.",
-      "i" = "got: {paste(widths, collapse = ', ')}"
-    ))
-  }
-  max_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
-  max_exprs <- vapply(
-    seq_len(widths[1L]),
-    function(i) {
-      terms <- vapply(
-        all_inbound_exprs,
-        function(e) backtick(e[i]),
-        character(1L)
-      )
-      paste0("pmax(", paste(terms, collapse = ", "), ")")
-    },
-    character(1L)
+  .k3_elementwise_merge(
+    lname,
+    topo_map,
+    expr_reg,
+    state,
+    "Maximum",
+    function(terms) paste0("pmax(", paste(terms, collapse = ", "), ")")
   )
-  state$all_exprs[[lname]] <- stats::setNames(max_exprs, max_names)
-  assign(lname, max_names, envir = expr_reg)
-  invisible(NULL)
 }
 
 
@@ -207,39 +156,14 @@
   last_dense
 ) {
   # Element-wise Minimum: per-element min over >=2 inputs
-  inbound <- topo_map[[lname]]
-  if (is.null(inbound) || length(inbound) < 2L) {
-    cli::cli_abort(c(
-      "Keras Minimum layer {.val {lname}} must have at least 2 inbound inputs.",
-      "i" = "got {length(inbound)}"
-    ))
-  }
-  all_inbound_exprs <- lapply(inbound, function(nm) {
-    get(nm, envir = expr_reg, inherits = FALSE)
-  })
-  widths <- lengths(all_inbound_exprs)
-  if (length(unique(widths)) != 1L) {
-    cli::cli_abort(c(
-      "Keras Minimum layer {.val {lname}}: all inputs must have the same width.",
-      "i" = "got: {paste(widths, collapse = ', ')}"
-    ))
-  }
-  min_names <- paste0("orbital_", lname, "_h", seq_len(widths[1L]))
-  min_exprs <- vapply(
-    seq_len(widths[1L]),
-    function(i) {
-      terms <- vapply(
-        all_inbound_exprs,
-        function(e) backtick(e[i]),
-        character(1L)
-      )
-      paste0("pmin(", paste(terms, collapse = ", "), ")")
-    },
-    character(1L)
+  .k3_elementwise_merge(
+    lname,
+    topo_map,
+    expr_reg,
+    state,
+    "Minimum",
+    function(terms) paste0("pmin(", paste(terms, collapse = ", "), ")")
   )
-  state$all_exprs[[lname]] <- stats::setNames(min_exprs, min_names)
-  assign(lname, min_names, envir = expr_reg)
-  invisible(NULL)
 }
 
 

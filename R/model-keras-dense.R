@@ -169,12 +169,26 @@
   } else {
     NULL
   }
+  act_default_value <- if (
+    is.list(activation_config) &&
+      !is.null(activation_config[["config"]])
+  ) {
+    activation_config[["config"]][["default_value"]] %||% 0
+  } else {
+    0
+  }
 
   if (lname %in% output_layer_names) {
     if (!activation %in% c("linear", "softmax", "log_softmax", "sigmoid")) {
       cli::cli_warn(c(
-        "Dense output layer {.val {lname}} has activation = {.val {activation}} which orbital will override.",
-        "i" = "orbital applies its own output transform based on {.arg mode}; the Keras activation on the output layer is ignored."
+        paste0(
+          "Dense output layer {.val {lname}} has activation",
+          " = {.val {activation}} which orbital will override."
+        ),
+        "i" = paste0(
+          "orbital applies its own output transform based on {.arg mode}; ",
+          "the Keras activation on the output layer is ignored."
+        )
       ))
     }
     state$out_pre_act_map[[lname]] <- pre_act
@@ -183,7 +197,12 @@
     act_exprs <- vapply(
       pre_act,
       function(z) {
-        activation_expr(activation, z, alpha = act_alpha)
+        activation_expr(
+          activation,
+          z,
+          alpha = act_alpha,
+          default_value = act_default_value
+        )
       },
       character(1)
     )

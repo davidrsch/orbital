@@ -117,12 +117,11 @@ orbital_keras_impl <- function(
   }
 
   # Linear model: optimised sequential traversal (no topology introspection needed)
-  n_dense <- length(all_weights) / 2L # each Dense layer has kernel + bias
-
   dense_layers <- Filter(
     function(l) grepl("dense", tolower(class(l)[1L])),
     all_layers
   )
+  n_dense <- length(dense_layers)
 
   n_in <- ncol(all_weights[[1L]])
   input_names <- if (!is.null(feature_names)) {
@@ -135,8 +134,13 @@ orbital_keras_impl <- function(
   current_names <- input_names
 
   for (i in seq_len(n_dense)) {
-    kernel <- t(all_weights[[2L * i - 1L]]) # (n_out_i x n_in_i)
-    bias <- as.numeric(all_weights[[2L * i]])
+    wts_i <- dense_layers[[i]]$get_weights()
+    kernel <- t(wts_i[[1L]]) # (n_out_i x n_in_i)
+    bias <- if (length(wts_i) >= 2L) {
+      as.numeric(wts_i[[2L]])
+    } else {
+      numeric(nrow(kernel))
+    }
 
     activation_config <- tryCatch(
       dense_layers[[i]]$get_config()$activation,
@@ -160,13 +164,28 @@ orbital_keras_impl <- function(
     } else {
       NULL
     }
+    act_default_value <- if (
+      is.list(activation_config) &&
+        !is.null(activation_config[["config"]])
+    ) {
+      activation_config[["config"]][["default_value"]] %||% 0
+    } else {
+      0
+    }
 
     pre_act <- build_mlp_pre_act(kernel, bias, current_names)
 
     if (i < n_dense) {
       act_exprs <- vapply(
         pre_act,
-        function(z) activation_expr(activation, z, alpha = act_alpha),
+        function(z) {
+          activation_expr(
+            activation,
+            z,
+            alpha = act_alpha,
+            default_value = act_default_value
+          )
+        },
         character(1)
       )
       layer_names <- paste0(

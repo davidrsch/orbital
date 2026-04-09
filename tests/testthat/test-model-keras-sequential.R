@@ -691,3 +691,34 @@ test_that("keras3 EinsumDense with LeakyReLU(alpha=0.2) predictions match keras3
     tolerance = 1e-5
   )
 })
+
+# ── Wave 1A regression: Sequential Dense(use_bias=FALSE) weight-counting fix ──
+
+test_that("Sequential Dense(use_bias=FALSE) + Dense produces correct predictions (Wave 1A regression)", {
+  skip_if_no_keras3()
+  k <- reticulate::import("keras")
+
+  model <- k$Sequential(list(
+    k$Input(shape = list(3L)),
+    k$layers$Dense(units = 8L, use_bias = FALSE, activation = "relu"),
+    k$layers$Dense(units = 1L)
+  ))
+
+  # Wave 1A fix: per-layer weight counting instead of length(all_weights)/2.
+  # Layer 0 (use_bias=FALSE) has 1 weight; layer 1 has 2 weights.
+  set.seed(42)
+  w1 <- matrix(rnorm(3L * 8L), nrow = 3L, ncol = 8L) # kernel (3 × 8)
+  w2 <- matrix(rnorm(8L * 1L), nrow = 8L, ncol = 1L) # kernel (8 × 1)
+  b2 <- array(rnorm(1L), dim = 1L) # bias  (1,)
+  model$set_weights(list(w1, w2, b2))
+
+  feature_names <- c("a", "b", "c")
+  df <- data.frame(a = c(1, 2, 3), b = c(-1, 0, 1), c = c(0.5, -0.5, 2))
+
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  preds_orb <- predict(orb_obj, df)$.pred
+  preds_keras <- as.numeric(
+    model$predict(as.matrix(df[, feature_names]), verbose = 0L)
+  )
+  expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
+})
