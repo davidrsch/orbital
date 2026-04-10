@@ -44,6 +44,7 @@ activation_expr <- function(
     "RectifierWithDropout" = glue::glue(
       "dplyr::if_else({x_expr} > 0, {x_expr}, 0)"
     ),
+    "Sigmoid" = ,
     "sigmoid" = glue::glue("1 / (1 + exp(-({x_expr})))"),
     "tanh" = ,
     "Tanh" = ,
@@ -119,6 +120,20 @@ activation_expr <- function(
       "{x_expr} * dplyr::if_else({x_expr} <= -3, 0,",
       " dplyr::if_else({x_expr} >= 3, 1, ({x_expr} + 3) / 6))"
     ),
+    "prelu" = {
+      a <- if (is.null(alpha)) {
+        cli::cli_warn(
+          "prelu: alpha not found; using default 0.01.",
+          .class = "orbital_alpha_default"
+        )
+        0.01
+      } else {
+        alpha
+      }
+      glue::glue(
+        "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * {x_expr})"
+      )
+    },
     "leaky_relu" = {
       a <- if (is.null(alpha)) {
         cli::cli_warn(
@@ -140,6 +155,7 @@ activation_expr <- function(
     "rrelu" = glue::glue(
       "dplyr::if_else({x_expr} >= 0, {x_expr}, 0.22916666666666666 * {x_expr})"
     ),
+    "sigmoid_linear_unit" = ,
     "silu" = ,
     "swish" = glue::glue("{x_expr} * (1 / (1 + exp(-({x_expr}))))"),
     "exponential" = glue::glue("exp({x_expr})"),

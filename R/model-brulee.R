@@ -30,6 +30,49 @@ brulee_extract_alphas <- function(x, activations, n_h_layers) {
             error = function(e) NULL
           )
           alphas[[i]] <- a
+        } else if (act == "prelu") {
+          # PReLU has per-channel learnable weights; brulee exports them via
+          # coef(x) under a key like "act<i>.weight" or "prelu.weight".
+          # Since activation_expr() only accepts a scalar alpha, we reduce to
+          # the first element with a warning.
+          coef_list <- tryCatch(stats::coef(x), error = function(e) NULL)
+          prelu_val <- NULL
+          if (!is.null(coef_list)) {
+            # Try common key patterns brulee may use for PReLU weights
+            candidate_keys <- c(
+              paste0("act", i, ".weight"),
+              "prelu.weight",
+              "weight"
+            )
+            for (k in candidate_keys) {
+              if (!is.null(coef_list[[k]])) {
+                prelu_val <- tryCatch(
+                  as.numeric(coef_list[[k]])[1],
+                  error = function(e) NULL
+                )
+                if (!is.null(prelu_val)) break
+              }
+            }
+          }
+          if (is.null(prelu_val)) {
+            cli::cli_warn(
+              c(
+                "PReLU weight not found in {.code coef()} output for layer {i}.",
+                "i" = "Falling back to PyTorch default init alpha = 0.25.",
+                "i" = "Full per-channel PReLU support requires an architectural change."
+              )
+            )
+            prelu_val <- 0.25
+          } else {
+            cli::cli_warn(
+              c(
+                "PReLU uses per-channel learnable weights, but {.fn activation_expr} only accepts a scalar alpha.",
+                "i" = "Reducing layer {i} PReLU weights to the first channel value ({prelu_val}).",
+                "i" = "Full per-channel support requires an architectural change."
+              )
+            )
+          }
+          alphas[[i]] <- prelu_val
         }
       }
       alphas

@@ -749,6 +749,39 @@ orbital_keras_dag_impl <- function(
         output_layer_names,
         last_dense
       )
+    } else if (grepl("normalization", cls)) {
+      .k3_normalization(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
+    } else if (grepl("categoryencoding", cls)) {
+      .k3_categoryencoding(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
+    } else if (grepl("integerlookup", cls)) {
+      .k3_integerlookup(
+        l,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
+      )
     } else {
       cli::cli_abort(c(
         "Unsupported layer type in Keras Functional model: {.cls {cls_orig}}.",

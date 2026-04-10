@@ -40,7 +40,7 @@
         } else {
             ba <- as.numeric(raw_b)
             b_input <- ba[seq_len(3L * H)]
-            b_recur <- ba[seq_len(3L * H) + 3L * H]
+            b_recur <- numeric(3L * H)
         }
     } else {
         b_input <- numeric(3L * H)
@@ -78,6 +78,7 @@
     return_seq <- isTRUE(
         tryCatch(as.logical(cfg_l$return_sequences), error = function(e) FALSE)
     )
+    go_backwards <- isTRUE(cfg_l$go_backwards)
     # When reset_after = TRUE (the Keras 3 default), the recurrent bias for
     # the h-tilde gate is applied INSIDE the reset-gate multiplication:
     #   h̃_t = g(x@Wh + b_hx + r_t[h] * (H_prev@Rh[h] + b_hh[h]))
@@ -111,7 +112,7 @@
 
     H_prev_nms <- NULL # NULL = zero initial hidden state
 
-    for (t in seq_len(T_len)) {
+    for (t in if (go_backwards) rev(seq_len(T_len)) else seq_len(T_len)) {
         x_t_exprs <- in_exprs[((t - 1L) * I_feat + 1L):(t * I_feat)]
 
         # z gate (update gate)

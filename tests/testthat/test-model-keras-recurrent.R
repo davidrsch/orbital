@@ -676,3 +676,131 @@ test_that("Bidirectional(LSTM, concat) with explicit 2-row bias matrices gives c
     tolerance = 1e-4
   )
 })
+
+# ── C5 regression: GRU reset_after=FALSE no NA; go_backwards ordering ─────────
+
+test_that("keras3 GRU (reset_after=FALSE) orbital expressions contain no NA values", {
+  skip_if_no_keras3()
+  k <- reticulate::import("keras")
+  T_len <- 3L
+  C_in <- 2L
+  H <- 2L
+  inp <- k$Input(shape = list(T_len, C_in))
+  x <- k$layers$GRU(H, return_sequences = FALSE, reset_after = FALSE)(inp)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, rnorm(n_row), epochs = 1L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  exprs <- unclass(orb_obj)
+
+  # Regression guard: the C5 bug caused NA to appear in the h-tilde expressions
+  expect_false(any(grepl("\\bNA\\b", exprs)))
+  expect_true(all(is.character(exprs)))
+})
+
+test_that("keras3 LSTM (go_backwards=TRUE) produces different orbital expressions than go_backwards=FALSE", {
+  skip_if_no_keras3()
+  k <- reticulate::import("keras")
+  T_len <- 3L
+  C_in <- 2L
+  H <- 2L
+
+  make_lstm_model <- function(go_bwd) {
+    inp <- k$Input(shape = list(T_len, C_in))
+    x <- k$layers$LSTM(H, return_sequences = FALSE, go_backwards = go_bwd)(inp)
+    out <- k$layers$Dense(1L)(x)
+    mdl <- k$Model(inputs = inp, outputs = out)
+    mdl$compile(optimizer = "adam", loss = "mse")
+    mdl
+  }
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+
+  model_fwd <- make_lstm_model(FALSE)
+  model_bwd <- make_lstm_model(TRUE)
+  # Fit forward model then copy identical weights to backward model so that any
+  # expression difference is purely structural (loop order), not numerical.
+  model_fwd$fit(x_3d, rnorm(n_row), epochs = 1L, verbose = 0L)
+  model_bwd$set_weights(model_fwd$get_weights())
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  orb_fwd <- orbital(
+    model_fwd,
+    mode = "regression",
+    feature_names = feature_names
+  )
+  orb_bwd <- orbital(
+    model_bwd,
+    mode = "regression",
+    feature_names = feature_names
+  )
+
+  # Regression guard: go_backwards changes the time-step traversal order, so
+  # the symbolic expression chain must differ between the two directions.
+  expect_false(identical(unclass(orb_fwd), unclass(orb_bwd)))
+})
+
+test_that("keras3 GRU (go_backwards=TRUE) produces different orbital expressions than go_backwards=FALSE", {
+  skip_if_no_keras3()
+  k <- reticulate::import("keras")
+  T_len <- 3L
+  C_in <- 2L
+  H <- 2L
+
+  make_gru_model <- function(go_bwd) {
+    inp <- k$Input(shape = list(T_len, C_in))
+    x <- k$layers$GRU(H, return_sequences = FALSE, go_backwards = go_bwd)(inp)
+    out <- k$layers$Dense(1L)(x)
+    mdl <- k$Model(inputs = inp, outputs = out)
+    mdl$compile(optimizer = "adam", loss = "mse")
+    mdl
+  }
+
+  set.seed(42)
+  n_row <- 10L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+
+  model_fwd <- make_gru_model(FALSE)
+  model_bwd <- make_gru_model(TRUE)
+  model_fwd$fit(x_3d, rnorm(n_row), epochs = 1L, verbose = 0L)
+  model_bwd$set_weights(model_fwd$get_weights())
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  orb_fwd <- orbital(
+    model_fwd,
+    mode = "regression",
+    feature_names = feature_names
+  )
+  orb_bwd <- orbital(
+    model_bwd,
+    mode = "regression",
+    feature_names = feature_names
+  )
+
+  # Regression guard: same as LSTM — loop order differs, so expressions differ.
+  expect_false(identical(unclass(orb_fwd), unclass(orb_bwd)))
+})
