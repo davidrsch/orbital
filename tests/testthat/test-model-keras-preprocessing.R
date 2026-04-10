@@ -202,3 +202,37 @@ test_that(".k3_categoryencoding raises an error for output_mode='count'", {
         "count"
     )
 })
+
+# -- End-to-end integration tests (require Keras / Python) --
+
+test_that("keras3 Functional model with Normalization layer is routed via DAG path", {
+  skip_if_no_keras3()
+
+  k <- reticulate::import("keras")
+  norm_layer <- k$layers$Normalization()
+
+  set.seed(42)
+  x_mat <- matrix(rnorm(40), nrow = 10, ncol = 4)
+  y_vec <- rnorm(10)
+  norm_layer$adapt(x_mat)
+
+  inp <- k$Input(shape = list(4L))
+  normed <- norm_layer(inp)
+  out <- k$layers$Dense(1L)(normed)
+  model <- k$Model(inp, out)
+  model$compile(optimizer = "adam", loss = "mse")
+  model$fit(x_mat, y_vec, epochs = 3L, verbose = 0L)
+
+  feature_names <- paste0("x", 1:4)
+  orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+
+  expect_true(is.character(orb_obj))
+  expect_named(orb_obj, ".pred", ignore.order = TRUE)
+
+  df <- as.data.frame(x_mat)
+  names(df) <- feature_names
+  preds <- predict(orb_obj, df)
+  keras_preds <- as.vector(model$predict(x_mat, verbose = 0L))
+
+  expect_equal(preds$.pred, keras_preds, tolerance = 1e-4)
+})

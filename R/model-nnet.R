@@ -10,6 +10,13 @@ orbital.nnet <- function(
   mode <- rlang::arg_match(mode)
   type <- default_type(type)
 
+  if (!inherits(x, "nnet")) {
+    cli::cli_abort(c(
+      "{.fn orbital} for the {.pkg nnet} backend requires a single {.cls nnet} object.",
+      "i" = "Bagged models ({.code bag_mlp(engine = \"nnet\")}) are not yet supported."
+    ))
+  }
+
   n_in <- x$n[1L]
   n_h <- x$n[2L]
   n_out <- x$n[3L]

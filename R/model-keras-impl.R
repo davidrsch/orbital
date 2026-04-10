@@ -72,7 +72,9 @@ orbital_keras_impl <- function(
       "\\bembedding\\b",
       "timedistributed",
       "upsampling1d",
-      "\\bmasking\\b"
+      "\\bmasking\\b",
+      # Preprocessing layers (Normalization, IntegerLookup, CategoryEncoding, etc.)
+      "preprocessing"
     ),
     collapse = "|"
   )

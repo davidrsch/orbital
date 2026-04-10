@@ -1,4 +1,4 @@
-test_that("mlp() nnet works with regression", {
+﻿test_that("mlp() nnet works with regression", {
   skip_if_not_installed("parsnip")
   skip_if_not_installed("nnet")
 
@@ -94,4 +94,40 @@ test_that("mlp() nnet works with multiclass prob", {
   rownames(exps) <- NULL
 
   expect_equal(preds, exps, tolerance = 1e-6)
+})
+
+test_that("orbital.nnet() errors informatively for non-nnet objects (bag_mlp guard)", {
+  skip_if_not_installed("parsnip")
+  skip_if_not_installed("nnet")
+
+  not_nnet <- structure(list(), class = "not_nnet")
+  expect_error(
+    orbital:::orbital.nnet(not_nnet),
+    regexp = "nnet backend requires a single"
+  )
+})
+
+test_that("mlp() nnet numerical parity holds for large hidden layer (>= 20 units)", {
+  skip_if_not_installed("parsnip")
+  skip_if_not_installed("nnet")
+
+  spec <- parsnip::mlp(hidden_units = 20, epochs = 200, engine = "nnet")
+  spec <- parsnip::set_mode(spec, "regression")
+
+  set.seed(42)
+  fit <- parsnip::fit(spec, mpg ~ disp + wt + hp + cyl + drat, mtcars)
+
+  orb_obj <- orbital(fit)
+  preds <- predict(orb_obj, mtcars)
+  exps <- predict(fit, mtcars)
+
+  expect_named(preds, ".pred")
+  expect_type(preds$.pred, "double")
+
+  exps <- as.data.frame(exps)
+  rownames(preds) <- NULL
+  rownames(exps) <- NULL
+
+  expect_equal(preds, exps, tolerance = 1e-5)
+})
 })

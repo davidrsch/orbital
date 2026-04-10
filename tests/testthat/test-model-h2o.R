@@ -171,3 +171,31 @@ test_that("mlp() h2o RectifierWithDropout activation works (inference = Rectifie
 
   expect_equal(preds, exps, tolerance = 1e-4)
 })
+
+test_that("mlp() h2o standardize=FALSE passes raw predictors without normalization", {
+  skip_if_not_installed("agua")
+  skip_if_not_installed("h2o")
+  skip_if_not_installed("parsnip")
+  skip_if(!.h2o_available(), "H2O server not available")
+
+  spec <- parsnip::mlp(hidden_units = 4, epochs = 20, engine = "h2o")
+  spec <- parsnip::set_mode(spec, "regression")
+  spec <- parsnip::set_engine(spec, "h2o", standardize = FALSE)
+
+  set.seed(1)
+  fit <- parsnip::fit(spec, mpg ~ disp + wt + hp, mtcars)
+
+  orb_obj <- orbital(fit)
+  preds <- predict(orb_obj, mtcars)
+  exps <- predict(fit, mtcars)
+
+  expect_named(preds, ".pred")
+  expect_type(preds$.pred, "double")
+
+  exps <- as.data.frame(exps)
+  rownames(preds) <- NULL
+  rownames(exps) <- NULL
+
+  expect_equal(preds, exps, tolerance = 1e-4)
+})
+})
