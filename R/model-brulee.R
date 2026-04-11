@@ -33,8 +33,7 @@ brulee_extract_alphas <- function(x, activations, n_h_layers) {
         } else if (act == "prelu") {
           # PReLU has per-channel learnable weights; brulee exports them via
           # coef(x) under a key like "act<i>.weight" or "prelu.weight".
-          # Since activation_expr() only accepts a scalar alpha, we reduce to
-          # the first element with a warning.
+          # The full weight vector is returned so each neuron gets its own alpha.
           coef_list <- tryCatch(stats::coef(x), error = function(e) NULL)
           prelu_val <- NULL
           if (!is.null(coef_list)) {
@@ -47,7 +46,7 @@ brulee_extract_alphas <- function(x, activations, n_h_layers) {
             for (k in candidate_keys) {
               if (!is.null(coef_list[[k]])) {
                 prelu_val <- tryCatch(
-                  as.numeric(coef_list[[k]])[1],
+                  as.numeric(coef_list[[k]]),
                   error = function(e) NULL
                 )
                 if (!is.null(prelu_val)) break
@@ -63,14 +62,6 @@ brulee_extract_alphas <- function(x, activations, n_h_layers) {
               )
             )
             prelu_val <- 0.25
-          } else {
-            cli::cli_warn(
-              c(
-                "PReLU uses per-channel learnable weights, but {.fn activation_expr} only accepts a scalar alpha.",
-                "i" = "Reducing layer {i} PReLU weights to the first channel value ({prelu_val}).",
-                "i" = "Full per-channel support requires an architectural change."
-              )
-            )
           }
           alphas[[i]] <- prelu_val
         }
@@ -97,11 +88,21 @@ orbital_brulee_mlp_impl <- function(x, mode, type, lvl, prefix) {
     b <- coef_obj[[paste0("fc", i, ".bias")]]
     pre_act <- build_mlp_pre_act(w, b, current_names)
     alpha_i <- if (!is.null(alphas)) alphas[[i]] else NULL
-    act <- vapply(
-      pre_act,
-      function(z) activation_expr(activations[i], z, alpha = alpha_i),
-      character(1)
-    )
+    act <- if (activations[i] == "prelu" && length(alpha_i) > 1L) {
+      vapply(
+        seq_along(pre_act),
+        function(j) {
+          activation_expr(activations[i], pre_act[[j]], alpha = alpha_i[[j]])
+        },
+        character(1)
+      )
+    } else {
+      vapply(
+        pre_act,
+        function(z) activation_expr(activations[i], z, alpha = alpha_i),
+        character(1)
+      )
+    }
     layer_names <- paste0("orbital_mlp_l", i, "_h", seq_len(nrow(w)))
     all_exprs[[i]] <- stats::setNames(act, layer_names)
     current_names <- layer_names

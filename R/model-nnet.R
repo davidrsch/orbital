@@ -62,30 +62,49 @@ orbital.nnet <- function(
     c(hidden_exprs, stats::setNames(output_pre_act[1L], prefix))
   } else if (mode == "classification" && n_out == 1L) {
     # Binary classification.
-    # parsnip post-processes nnet raw output p = sigmoid(linear) via:
-    #   cbind(1-p, p)  then  row-wise softmax
-    # giving: pred_0 = exp(1-p)/(exp(1-p)+exp(p)),
-    #         pred_1 = exp(p)/(exp(1-p)+exp(p))
+    # nnet emits a single sigmoid probability p for the second level. parsnip's
+    # probability path then softmaxes the two-column expansion cbind(1 - p, p),
+    # so orbital mirrors that exact post-processing for numerical parity.
     sigmoid_expr <- activation_expr("sigmoid", output_pre_act[1L])
+    res <- NULL
 
-    c(hidden_exprs, binary_from_prob(sigmoid_expr, type, lvl))
+    if ("class" %in% type) {
+      res <- c(res, binary_from_prob(sigmoid_expr, "class", lvl))
+    }
+    if ("prob" %in% type) {
+      neg_expr <- glue::glue("1 - ({sigmoid_expr})")
+      denom_expr <- glue::glue("exp({neg_expr}) + exp({sigmoid_expr})")
+      res <- c(
+        res,
+        orbital_tmp_prob_name1 = glue::glue("exp({neg_expr}) / ({denom_expr})"),
+        orbital_tmp_prob_name2 = glue::glue(
+          "exp({sigmoid_expr}) / ({denom_expr})"
+        )
+      )
+    }
+
+    c(hidden_exprs, res)
   } else {
     # Multiclass classification.
-    # nnet output layer applies softmax internally, so output_pre_act passed
-    # through one softmax gives the true probability distribution.
-    lvl_bt <- backtick(lvl)
+    # nnet's raw multiclass outputs are post-softmax probabilities, and parsnip
+    # applies one more softmax-style normalization step when returning
+    # class probabilities. Mirror that behavior for exact predict() parity.
+    logit_cols <- paste0("orbital_nnet_logit_", seq_along(lvl))
+    logit_bt <- backtick(logit_cols)
     norm1_col <- "orbital_nnet_norm1"
     norm1_bt <- backtick(norm1_col)
     raw_cols <- paste0("orbital_nnet_raw_", seq_along(lvl))
     raw_bt <- backtick(raw_cols)
+    norm2_col <- "orbital_nnet_norm2"
+    norm2_bt <- backtick(norm2_col)
 
-    logit_exprs <- stats::setNames(output_pre_act, lvl)
+    logit_exprs <- stats::setNames(output_pre_act, logit_cols)
     norm1_expr <- glue::glue_collapse(
-      glue::glue("exp({lvl_bt})"),
+      glue::glue("exp({logit_bt})"),
       sep = " + "
     )
     raw_exprs <- stats::setNames(
-      glue::glue("exp({lvl_bt}) / {norm1_bt}"),
+      glue::glue("exp({logit_bt}) / {norm1_bt}"),
       raw_cols
     )
 
@@ -96,13 +115,20 @@ orbital.nnet <- function(
     )
 
     if ("class" %in% type) {
-      # argmax is invariant to monotone transforms, use logit columns
-      res <- c(res, orbital_tmp_class_name = softmax_class(lvl))
+      # argmax is invariant to monotone transforms, so compare the logit columns
+      # while still returning the original class labels from `lvl`.
+      res <- c(res, orbital_tmp_class_name = softmax_class(logit_cols, lvl))
     }
     if ("prob" %in% type) {
-      prob_exprs <- as.character(raw_bt)
-      names(prob_exprs) <- paste0("orbital_tmp_prob_name", seq_along(lvl))
-      res <- c(res, prob_exprs)
+      norm2_expr <- glue::glue_collapse(
+        glue::glue("exp({raw_bt})"),
+        sep = " + "
+      )
+      prob_exprs <- stats::setNames(
+        glue::glue("exp({raw_bt}) / {norm2_bt}"),
+        paste0("orbital_tmp_prob_name", seq_along(lvl))
+      )
+      res <- c(res, stats::setNames(norm2_expr, norm2_col), prob_exprs)
     }
     c(hidden_exprs, res)
   }

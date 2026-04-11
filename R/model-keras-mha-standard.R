@@ -116,67 +116,41 @@
     )
   }
 
-  # Determine weight accessor functions given that Keras3 EinsumDense stores
-  # Q/K kernels as 3-D arrays.  Two known layouts:
-  #   (a) (C_in, key_dim, num_heads)  — einsum "abc,ced->abde" with d=num_heads,e=key_dim
-  #   (b) (C_in, num_heads, key_dim)  — alternative layout
-  .make_proj_at <- function(k, dim2_size, dim3_size, name) {
-    d <- dim(k)
-    if (length(d) != 3L) {
-      cli::cli_abort(
-        "MHA {.val {lname}}: {name} kernel must be 3-D, got {length(d)}D."
-      )
-    }
-    if (d[1L] != C_in) {
-      cli::cli_abort(
-        "MHA {.val {lname}}: {name} kernel dim1={d[1L]} does not match C_in={C_in}."
-      )
-    }
-    if (dim2_size == dim3_size) {
-      cli::cli_warn(
-        paste0(
-          "MHA {.val {lname}}: {name} kernel dims 2 and 3 are equal ({dim2_size}); ",
-          "layout is ambiguous \u2014 assuming ({C_in}, {dim2_size}, {dim3_size})."
-        ),
-        .class = "orbital_mha_kernel_ambiguous"
-      )
-    }
-    if (d[2L] == dim2_size && d[3L] == dim3_size) {
-      function(c_idx, idx2, idx3) k[c_idx, idx2, idx3]
-    } else if (d[2L] == dim3_size && d[3L] == dim2_size) {
-      function(c_idx, idx2, idx3) k[c_idx, idx3, idx2]
-    } else {
-      cli::cli_abort(
-        "MHA {.val {lname}}: {name} kernel dims ({d}) cannot be reconciled with ",
-        "expected ({C_in}, {dim2_size}, {dim3_size}) or transposed."
-      )
-    }
-  }
+  # Resolve the shared Q/K/V kernel layouts via the common helper.
+  wq_at <- .mha_resolve_3d_kernel(
+    wq$kernel,
+    key_dim,
+    num_heads,
+    C_in,
+    lname,
+    "Q",
+    layer_abbr = "MHA",
+    ambiguity_hint = "Use a configuration with {.code key_dim != num_heads} to avoid this ambiguity."
+  )
+  wk_at <- .mha_resolve_3d_kernel(
+    wk$kernel,
+    key_dim,
+    num_heads,
+    C_in,
+    lname,
+    "K",
+    layer_abbr = "MHA",
+    ambiguity_hint = "Use a configuration with {.code key_dim != num_heads} to avoid this ambiguity."
+  )
+  wv_at <- .mha_resolve_3d_kernel(
+    wv$kernel,
+    value_dim,
+    num_heads,
+    C_in,
+    lname,
+    "V",
+    layer_abbr = "MHA",
+    ambiguity_hint = "Use a configuration with {.code value_dim != num_heads} to avoid this ambiguity."
+  )
 
-  # Q/K: (C_in, ?, ?) with dims key_dim and num_heads in some order.
-  # After .make_proj_at, call as wq_at(c, key_dim_idx, head_idx) → scalar.
-  wq_at <- .make_proj_at(wq$kernel, key_dim, num_heads, "Q")
-  wk_at <- .make_proj_at(wk$kernel, key_dim, num_heads, "K")
-  # V: (C_in, ?, ?) with dims value_dim and num_heads.
-  wv_at <- .make_proj_at(wv$kernel, value_dim, num_heads, "V")
-
-  # Q bias accessor: shape (key_dim, num_heads) or (num_heads, key_dim).
-  .make_bias_at2 <- function(b, d2, d3, name) {
-    if (is.null(b)) {
-      return(function(i2, i3) "0")
-    }
-    di <- dim(b)
-    if (length(di) == 2L && di[1L] == d2 && di[2L] == d3) {
-      function(i2, i3) format_numeric(b[i2, i3])
-    } else if (length(di) == 2L && di[1L] == d3 && di[2L] == d2) {
-      function(i2, i3) format_numeric(b[i3, i2])
-    } else {
-      function(i2, i3) "0"
-    }
-  }
-  bq_at <- .make_bias_at2(wq$bias, key_dim, num_heads, "Q_bias")
-  bk_at <- .make_bias_at2(wk$bias, key_dim, num_heads, "K_bias")
-  bv_at <- .make_bias_at2(wv$bias, value_dim, num_heads, "V_bias")
+  bq_at <- .mha_bias_accessor2(wq$bias, key_dim, num_heads)
+  bk_at <- .mha_bias_accessor2(wk$bias, key_dim, num_heads)
+  bv_at <- .mha_bias_accessor2(wv$bias, value_dim, num_heads)
 
   # Output projection: (num_heads, value_dim, C_out) or transposed.
   wo_d <- dim(wo$kernel)

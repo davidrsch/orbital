@@ -1,4 +1,4 @@
-﻿test_that("mlp() nnet works with regression", {
+test_that("mlp() nnet works with regression", {
   skip_if_not_installed("parsnip")
   skip_if_not_installed("nnet")
 
@@ -96,6 +96,28 @@ test_that("mlp() nnet works with multiclass prob", {
   expect_equal(preds, exps, tolerance = 1e-6)
 })
 
+test_that("mlp() nnet works with multiclass class", {
+  skip_if_not_installed("parsnip")
+  skip_if_not_installed("nnet")
+
+  spec <- parsnip::mlp(hidden_units = 5, epochs = 100, engine = "nnet")
+  spec <- parsnip::set_mode(spec, "classification")
+
+  set.seed(1)
+  fit <- parsnip::fit(
+    spec,
+    Species ~ Sepal.Length + Sepal.Width + Petal.Length,
+    iris
+  )
+
+  orb_obj <- orbital(fit, type = "class")
+  preds <- predict(orb_obj, iris)
+  exps <- predict(fit, iris)
+
+  expect_named(preds, ".pred_class")
+  expect_identical(preds$.pred_class, as.character(exps$.pred_class))
+})
+
 test_that("orbital.nnet() errors informatively for non-nnet objects (bag_mlp guard)", {
   skip_if_not_installed("parsnip")
   skip_if_not_installed("nnet")
@@ -129,5 +151,4 @@ test_that("mlp() nnet numerical parity holds for large hidden layer (>= 20 units
   rownames(exps) <- NULL
 
   expect_equal(preds, exps, tolerance = 1e-5)
-})
 })

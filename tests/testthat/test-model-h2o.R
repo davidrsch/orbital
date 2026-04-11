@@ -101,6 +101,42 @@ test_that("mlp() h2o with tanh activation works", {
   expect_named(preds, ".pred")
 })
 
+test_that("mlp() h2o with TanhWithDropout activation works (inference = Tanh)", {
+  skip_if_not_installed("agua")
+  skip_if_not_installed("h2o")
+  skip_if_not_installed("parsnip")
+  skip_if(!.h2o_available(), "H2O server not available")
+
+  spec <- parsnip::mlp(hidden_units = 4, epochs = 10, engine = "h2o")
+  spec <- parsnip::set_mode(spec, "regression")
+  spec <- parsnip::set_engine(spec, "h2o", activation = "TanhWithDropout")
+
+  set.seed(1)
+  fit <- parsnip::fit(spec, mpg ~ disp + wt + hp, mtcars)
+
+  orb_obj <- orbital(fit)
+  preds <- predict(orb_obj, mtcars)
+  exps <- predict(fit, mtcars)
+
+  expect_named(preds, ".pred")
+  exps <- as.data.frame(exps)
+  rownames(preds) <- NULL
+  rownames(exps) <- NULL
+
+  expect_equal(preds, exps, tolerance = 1e-4)
+})
+
+test_that("H2O dropout activation aliases map to the same inference expressions offline", {
+  expect_identical(
+    orbital:::activation_expr("TanhWithDropout", "z"),
+    orbital:::activation_expr("Tanh", "z")
+  )
+  expect_identical(
+    orbital:::activation_expr("RectifierWithDropout", "z"),
+    orbital:::activation_expr("Rectifier", "z")
+  )
+})
+
 test_that("mlp() h2o Maxout activation raises informative error", {
   skip_if_not_installed("agua")
   skip_if_not_installed("h2o")
@@ -145,6 +181,30 @@ test_that("mlp() h2o engine works with multiclass probability", {
   rownames(exps) <- NULL
 
   expect_equal(preds, exps, tolerance = 1e-4)
+})
+
+test_that("mlp() h2o engine works with multiclass class", {
+  skip_if_not_installed("agua")
+  skip_if_not_installed("h2o")
+  skip_if_not_installed("parsnip")
+  skip_if(!.h2o_available(), "H2O server not available")
+
+  spec <- parsnip::mlp(hidden_units = 4, epochs = 20, engine = "h2o")
+  spec <- parsnip::set_mode(spec, "classification")
+
+  set.seed(1)
+  fit <- parsnip::fit(
+    spec,
+    Species ~ Sepal.Length + Sepal.Width + Petal.Length,
+    iris
+  )
+
+  orb_obj <- orbital(fit, type = "class")
+  preds <- predict(orb_obj, iris)
+  exps <- predict(fit, iris)
+
+  expect_named(preds, ".pred_class")
+  expect_identical(preds$.pred_class, as.character(exps$.pred_class))
 })
 
 test_that("mlp() h2o RectifierWithDropout activation works (inference = Rectifier)", {
@@ -197,5 +257,4 @@ test_that("mlp() h2o standardize=FALSE passes raw predictors without normalizati
   rownames(exps) <- NULL
 
   expect_equal(preds, exps, tolerance = 1e-4)
-})
 })

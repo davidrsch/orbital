@@ -328,7 +328,8 @@ orbital_keras_dag_impl <- function(
     } else if (
       grepl(
         "dropout|flatten|reshape|gaussiannoise|activityregularization|\\bidentity\\b",
-        cls
+        cls,
+        perl = TRUE
       )
     ) {
       .k3_dropout_passthru(

@@ -44,6 +44,12 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
 
   for (mat_id in seq_len(n_matrices)) {
     wt_df <- as.data.frame(h2o::h2o.weights(x, matrix_id = mat_id))
+    if (!identical(colnames(wt_df)[1L], "Bias")) {
+      cli::cli_abort(c(
+        "H2O weight matrix {.val {mat_id}} has unexpected first column {.val {colnames(wt_df)[1L]}}.",
+        "i" = "orbital expects the bias column to be named {.val Bias} in {.fn h2o.weights} output."
+      ))
+    }
     biases <- wt_df[, 1L]
     wt_mat <- as.matrix(wt_df[, -1L, drop = FALSE])
 

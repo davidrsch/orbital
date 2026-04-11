@@ -246,3 +246,70 @@ test_that("mlp() brulee with silu activation matches predictions", {
 
   expect_equal(preds, exps, tolerance = 1e-5)
 })
+
+test_that("mlp() brulee works with multiclass class", {
+  skip_if_not_installed("parsnip")
+  skip_if_not_installed("brulee")
+  skip_if(!torch::torch_is_installed(), "torch not installed")
+
+  spec <- parsnip::mlp(hidden_units = 5, epochs = 20, engine = "brulee") |>
+    parsnip::set_mode("classification")
+
+  set.seed(1)
+  fit <- parsnip::fit(
+    spec,
+    Species ~ Sepal.Length + Sepal.Width + Petal.Length,
+    iris
+  )
+
+  orb_obj <- orbital(fit, type = "class")
+  preds <- predict(orb_obj, iris)
+  exps <- predict(fit, iris)
+
+  expect_named(preds, ".pred_class")
+  expect_identical(preds$.pred_class, as.character(exps$.pred_class))
+})
+
+test_that("mlp() brulee activation sweep matches predictions for additional activations", {
+  skip_if_not_installed("parsnip")
+  skip_if_not_installed("brulee")
+  skip_if(!torch::torch_is_installed(), "torch not installed")
+
+  extra_activations <- c(
+    "tanh",
+    "sigmoid",
+    "linear",
+    "celu",
+    "prelu",
+    "relu6",
+    "hardtanh",
+    "softplus",
+    "softsign",
+    "hardswish",
+    "hardsigmoid"
+  )
+
+  for (act in extra_activations) {
+    spec <- parsnip::mlp(hidden_units = 4, epochs = 10, engine = "brulee") |>
+      parsnip::set_mode("regression") |>
+      parsnip::set_engine("brulee", activation = act)
+
+    set.seed(1)
+    fit <- parsnip::fit(spec, mpg ~ disp + wt + hp, mtcars)
+
+    orb_obj <- orbital(fit)
+    preds <- predict(orb_obj, mtcars)
+    exps <- predict(fit, mtcars)
+
+    exps <- as.data.frame(exps)
+    rownames(preds) <- NULL
+    rownames(exps) <- NULL
+
+    expect_equal(
+      preds,
+      exps,
+      tolerance = 1e-5,
+      info = paste("activation =", act)
+    )
+  }
+})

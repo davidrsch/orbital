@@ -75,61 +75,39 @@
     ))
   }
 
-  # Build accessor for a 3-D kernel (C_in, d2, d3) with possible dim swap.
-  .gqa_proj_at <- function(k, d2, d3, name) {
-    d <- dim(k)
-    if (length(d) != 3L) {
-      cli::cli_abort(
-        "GQA {.val {lname}}: {name} kernel must be 3-D, got {length(d)}D."
-      )
-    }
-    if (d[1L] != C_in) {
-      cli::cli_abort(
-        "GQA {.val {lname}}: {name} kernel dim1={d[1L]} != C_in={C_in}."
-      )
-    }
-    if (d2 == d3) {
-      cli::cli_warn(
-        paste0(
-          "GQA {.val {lname}}: {name} kernel dims 2 and 3 are equal ({d2}); ",
-          "layout is ambiguous \u2014 assuming ({C_in}, {d2}, {d3})."
-        ),
-        .class = "orbital_mha_kernel_ambiguous"
-      )
-    }
-    if (d[2L] == d2 && d[3L] == d3) {
-      function(c_i, i2, i3) k[c_i, i2, i3]
-    } else if (d[2L] == d3 && d[3L] == d2) {
-      function(c_i, i2, i3) k[c_i, i3, i2]
-    } else {
-      cli::cli_abort(
-        "GQA {.val {lname}}: {name} kernel dims ({paste(d,collapse='x')}) unrecognised."
-      )
-    }
-  }
-
-  .gqa_bias2 <- function(b, d2, d3) {
-    if (is.null(b)) {
-      return(function(i2, i3) "0")
-    }
-    di <- dim(b)
-    if (!is.null(di) && length(di) == 2L && di[1L] == d2 && di[2L] == d3) {
-      function(i2, i3) format_numeric(b[i2, i3])
-    } else if (
-      !is.null(di) && length(di) == 2L && di[1L] == d3 && di[2L] == d2
-    ) {
-      function(i2, i3) format_numeric(b[i3, i2])
-    } else {
-      function(i2, i3) "0"
-    }
-  }
-
-  wq_at <- .gqa_proj_at(wq$kernel, head_dim, num_heads, "Q")
-  wk_at <- .gqa_proj_at(wk$kernel, head_dim, num_kv, "K")
-  wv_at <- .gqa_proj_at(wv$kernel, head_dim, num_kv, "V")
-  bq_at <- .gqa_bias2(wq$bias, head_dim, num_heads)
-  bk_at <- .gqa_bias2(wk$bias, head_dim, num_kv)
-  bv_at <- .gqa_bias2(wv$bias, head_dim, num_kv)
+  wq_at <- .mha_resolve_3d_kernel(
+    wq$kernel,
+    head_dim,
+    num_heads,
+    C_in,
+    lname,
+    "Q",
+    layer_abbr = "GQA",
+    ambiguity_hint = "Use a configuration where the projected head dimension differs from the head/group count to avoid this ambiguity."
+  )
+  wk_at <- .mha_resolve_3d_kernel(
+    wk$kernel,
+    head_dim,
+    num_kv,
+    C_in,
+    lname,
+    "K",
+    layer_abbr = "GQA",
+    ambiguity_hint = "Use a configuration where the projected head dimension differs from the head/group count to avoid this ambiguity."
+  )
+  wv_at <- .mha_resolve_3d_kernel(
+    wv$kernel,
+    head_dim,
+    num_kv,
+    C_in,
+    lname,
+    "V",
+    layer_abbr = "GQA",
+    ambiguity_hint = "Use a configuration where the projected head dimension differs from the head/group count to avoid this ambiguity."
+  )
+  bq_at <- .mha_bias_accessor2(wq$bias, head_dim, num_heads)
+  bk_at <- .mha_bias_accessor2(wk$bias, head_dim, num_kv)
+  bv_at <- .mha_bias_accessor2(wv$bias, head_dim, num_kv)
 
   wo_d <- dim(wo$kernel)
   if (length(wo_d) == 3L && wo_d[1L] == num_heads && wo_d[2L] == head_dim) {
@@ -443,5 +421,3 @@
   assign(lname, out_nms, envir = expr_reg)
   invisible(NULL)
 }
-
-

@@ -48,18 +48,18 @@ binary_from_prob_first <- function(eq, type, lvl) {
 
 # Generate class selection from logits/scores (pick class with max value)
 # Uses >= to break ties in favor of earlier classes (matching randomForest behavior)
-softmax_class <- function(lvl) {
+softmax_class <- function(lvl, labels = lvl) {
   lvl_bt <- backtick(lvl)
   res <- character(0)
   for (i in seq(1, length(lvl) - 1)) {
     line <- glue::glue("{lvl_bt[i]} >= {lvl_bt[-i]}")
     line <- glue::glue_collapse(line, sep = " & ")
-    line <- glue::glue("{line} ~ {glue::double_quote(lvl[i])}")
+    line <- glue::glue("{line} ~ {glue::double_quote(labels[i])}")
     res[i] <- line
   }
 
   res <- glue::glue_collapse(res, ", ")
-  default <- glue::double_quote(lvl[length(lvl)])
+  default <- glue::double_quote(labels[length(labels)])
   glue::glue("dplyr::case_when({res}, .default = {default})")
 }
 
