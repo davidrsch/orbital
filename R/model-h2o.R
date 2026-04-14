@@ -20,18 +20,21 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
     activation <- "Rectifier"
   }
 
-  # Maxout uses a sub-unit max-pooling architecture that cannot be expressed
-  # as a single SQL expression per neuron.  Detect early and raise a clear error.
-  if (activation %in% c("Maxout", "MaxoutWithDropout")) {
-    cli::cli_abort(c(
-      "orbital does not yet support the {.val {activation}} activation in H2O DeepLearning models.",
-      "i" = paste0(
-        "Maxout uses a grouped max-pooling architecture (max over k sub-units per neuron) ",
-        "that requires special SQL handling beyond the current implementation."
-      ),
-      "i" = "For orbital-compatible H2O models use {.val Rectifier}, {.val Tanh}, or {.val Sigmoid}.",
-      "i" = "Full Maxout support is tracked at {.url https://github.com/davidrsch/orbital/issues/13}."
-    ))
+  # Maxout uses a grouped max-pooling architecture.
+  # H2O stores `n_hidden * maxout_size` weight rows per layer; each neuron
+  # corresponds to `maxout_size` sub-units and the output is their maximum.
+  is_maxout <- activation %in% c("Maxout", "MaxoutWithDropout")
+  maxout_size <- if (is_maxout) {
+    sz <- x@parameters$maxout_size
+    if (is.null(sz) || !is.numeric(sz) || sz < 2L) {
+      cli::cli_abort(c(
+        "Cannot determine {.arg maxout_size} for H2O Maxout model.",
+        "i" = "{.code x@parameters$maxout_size} is missing or < 2."
+      ))
+    }
+    as.integer(sz)
+  } else {
+    NULL
   }
 
   # These are NULL when standardize = FALSE was used during training
@@ -84,17 +87,43 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
 
     if (mat_id < n_matrices) {
       # Hidden layer: apply activation
-      act <- vapply(
-        pre_act,
-        function(z) activation_expr(activation, z),
-        character(1)
-      )
-      layer_names <- paste0(
-        "orbital_mlp_l",
-        mat_id,
-        "_h",
-        seq_len(nrow(wt_mat))
-      )
+      if (is_maxout) {
+        # Maxout: each neuron = max over maxout_size consecutive sub-units.
+        # H2O stores rows in groups of maxout_size: [sub1_n1, sub2_n1, ..., subK_n1, sub1_n2, ...]
+        n_sub_units <- nrow(wt_mat)
+        n_neurons <- n_sub_units %/% maxout_size
+        if (n_sub_units %% maxout_size != 0L) {
+          cli::cli_abort(c(
+            "H2O Maxout layer {mat_id}: weight matrix has {n_sub_units} rows which",
+            "is not divisible by maxout_size={maxout_size}.",
+            "i" = "Expected {maxout_size} sub-units per neuron."
+          ))
+        }
+        act <- vapply(
+          seq_len(n_neurons),
+          function(neuron) {
+            sub_exprs <- pre_act[
+              ((neuron - 1L) * maxout_size + 1L):(neuron * maxout_size)
+            ]
+            # Build pmax(sub1, sub2, ..., subK)
+            paste0("pmax(", paste(sub_exprs, collapse = ", "), ")")
+          },
+          character(1)
+        )
+        layer_names <- paste0("orbital_mlp_l", mat_id, "_h", seq_len(n_neurons))
+      } else {
+        act <- vapply(
+          pre_act,
+          function(z) activation_expr(activation, z),
+          character(1)
+        )
+        layer_names <- paste0(
+          "orbital_mlp_l",
+          mat_id,
+          "_h",
+          seq_len(nrow(wt_mat))
+        )
+      }
       all_exprs[[paste0("l", mat_id)]] <- stats::setNames(
         act,
         layer_names

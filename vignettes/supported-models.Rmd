@@ -55,7 +55,8 @@ tibble::tribble(
   "`mlp()`", "`\"brulee_two_layer\"`", "✅", "✅", "✅",
   "`mlp()`", "`\"keras\"`", "✅", "✅", "✅",
   "`mlp()`", "`\"h2o\"`", "✅", "✅", "✅",
-  "`mlp()`", "`\"kerasnip\"`", "✅", "✅", "✅"
+  "`mlp()`", "`\"kerasnip\"`", "✅", "✅", "✅",
+  "`qrnn::qrnn.fit()`", "`as_qrnn_fit()`", "✅", "❌", "❌"
 ) |>
   gt() |>
   tab_spanner(
@@ -87,9 +88,9 @@ tibble::tribble(
 
 ## Artificial Neural Networks (MLP models)
 
-orbital translates `mlp()` models from nnet, brulee, keras, keras3, kerasnip, and H2O
-to SQL by unrolling every weight matrix and activation function into a chain of
-SQL column expressions.
+orbital translates `mlp()` models from nnet, brulee, keras, keras3, kerasnip, H2O,
+and qrnn to SQL by unrolling every weight matrix and activation function into a chain
+of SQL column expressions.
 
 ### Supported activations
 
@@ -145,10 +146,16 @@ process to *fit* the model.  orbital only handles the *prediction* translation;
 no Python/JVM process is needed at inference time once the orbital object is
 created.
 
-**H2O Maxout** The Maxout activation uses a grouped max-pooling architecture
-that orbital does not yet support.  A call to `orbital()` on an H2O model trained
-with `activation = "Maxout"` raises an informative error.  Use `Rectifier`,
-`Tanh`, or `Sigmoid` for orbital-compatible H2O models.
+**qrnn models** The qrnn package is not a parsnip engine.  Pass the list returned
+by `qrnn::qrnn.fit()` through `as_qrnn_fit()` to tag it for S3 dispatch before
+calling `orbital()`.  Only single-bag (`n.trials = 1`), single-hidden-layer,
+non-additive models are supported.  All standard qrnn activation functions
+(`sigmoid`, `logistic`, `relu`, `lrelu`, `elu`, `softplus`, `linear`) are detected
+automatically from the stored `$Th` closure.
+
+**H2O Maxout** The Maxout activation uses a grouped max-pooling architecture.
+orbital implements this via `pmax()` (SQL `GREATEST()`), grouping the sub-units
+according to `maxout_size` from `x@parameters$maxout_size`.
 
 ## Recipes steps
 

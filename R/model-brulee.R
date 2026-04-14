@@ -87,24 +87,28 @@ orbital_brulee_mlp_impl <- function(x, mode, type, lvl, prefix) {
     w <- coef_obj[[paste0("fc", i, ".weight")]]
     b <- coef_obj[[paste0("fc", i, ".bias")]]
     pre_act <- build_mlp_pre_act(w, b, current_names)
+    layer_names <- paste0("orbital_mlp_l", i, "_h", seq_len(nrow(w)))
     alpha_i <- if (!is.null(alphas)) alphas[[i]] else NULL
-    act <- if (activations[i] == "prelu" && length(alpha_i) > 1L) {
-      vapply(
+    if (activations[i] == "softmax") {
+      norm_col <- paste0("orbital_mlp_l", i, "_softmax_norm")
+      all_exprs[[i]] <- softmax_hidden_exprs(pre_act, layer_names, norm_col)
+    } else if (activations[i] == "prelu" && length(alpha_i) > 1L) {
+      act <- vapply(
         seq_along(pre_act),
         function(j) {
           activation_expr(activations[i], pre_act[[j]], alpha = alpha_i[[j]])
         },
         character(1)
       )
+      all_exprs[[i]] <- stats::setNames(act, layer_names)
     } else {
-      vapply(
+      act <- vapply(
         pre_act,
         function(z) activation_expr(activations[i], z, alpha = alpha_i),
         character(1)
       )
+      all_exprs[[i]] <- stats::setNames(act, layer_names)
     }
-    layer_names <- paste0("orbital_mlp_l", i, "_h", seq_len(nrow(w)))
-    all_exprs[[i]] <- stats::setNames(act, layer_names)
     current_names <- layer_names
   }
 

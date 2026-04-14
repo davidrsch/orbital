@@ -279,6 +279,45 @@ build_mlp_pre_act <- function(weight_mat, biases, input_names) {
   )
 }
 
+# Build softmax expressions for a hidden MLP layer.
+#
+# Returns a named character vector suitable for inclusion in an orbital
+# expression list.  The vector contains:
+#   - one "norm" entry (the sum of exponentials, named `norm_col_name`) that
+#     must appear BEFORE the unit entries so that `dplyr::mutate()` evaluates
+#     it first and later unit expressions can reference it by column name;
+#   - one entry per output unit (named according to `unit_names`), each
+#     computing `exp(z_j) / norm_col_name`.
+#
+# This mirrors the approach used by `multiclass_from_logits()` in
+# classification-helpers.R for the output-layer softmax.
+#
+# Parameters
+# ----------
+# pre_act_exprs : character vector
+#   SQL/dplyr pre-activation expressions, one per output unit.
+# unit_names : character vector
+#   Column names for the output units (length == length(pre_act_exprs)).
+# norm_col_name : string
+#   Name for the intermediate sum-of-exponentials column.
+softmax_hidden_exprs <- function(pre_act_exprs, unit_names, norm_col_name) {
+  exp_exprs <- vapply(
+    pre_act_exprs,
+    function(z) paste0("exp(", z, ")"),
+    character(1)
+  )
+  norm_expr <- paste(exp_exprs, collapse = " + ")
+  unit_exprs <- vapply(
+    seq_along(pre_act_exprs),
+    function(j) paste0("exp(", pre_act_exprs[j], ") / ", norm_col_name),
+    character(1)
+  )
+  c(
+    stats::setNames(norm_expr, norm_col_name),
+    stats::setNames(unit_exprs, unit_names)
+  )
+}
+
 # Generate a vector of column names for an intermediate layer output.
 # Returns paste0("orbital_", layer_type, "_", lname, "_", suffix, seq_len(n)).
 .orb_col_nms <- function(layer_type, lname, suffix, n) {

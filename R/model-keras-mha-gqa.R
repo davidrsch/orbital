@@ -132,122 +132,46 @@
   q_at <- function(t, c) backtick(q_exprs[(t - 1L) * C_in + c])
   kv_at <- function(t, c) backtick(kv_exprs[(t - 1L) * C_in + c])
 
-  gqa_nms <- character(0L)
-  gqa_exprs <- character(0L)
+  # Q / K / V projections via shared helper (model-keras-mha-gqa-projections.R)
+  q_proj <- .gqa_linear_project(
+    T_q,
+    num_heads,
+    head_dim,
+    C_in,
+    q_at,
+    wq_at,
+    bq_at,
+    lname,
+    "Q"
+  )
+  k_proj <- .gqa_linear_project(
+    T_kv,
+    num_kv,
+    head_dim,
+    C_in,
+    kv_at,
+    wk_at,
+    bk_at,
+    lname,
+    "K"
+  )
+  v_proj <- .gqa_linear_project(
+    T_kv,
+    num_kv,
+    head_dim,
+    C_in,
+    kv_at,
+    wv_at,
+    bv_at,
+    lname,
+    "V"
+  )
 
-  # Q projections: Q[q, h, d] = sum_c q_in[q,c] * W_q(c, d, h) + b_q(d, h)
-  q_nm <- array(NA_character_, dim = c(T_q, num_heads, head_dim))
-  for (q in seq_len(T_q)) {
-    for (h in seq_len(num_heads)) {
-      for (d in seq_len(head_dim)) {
-        terms <- vapply(
-          seq_len(C_in),
-          function(c) {
-            paste0(q_at(q, c), " * ", format_numeric(wq_at(c, d, h)))
-          },
-          character(1L)
-        )
-        nm <- paste0(
-          "orbital_gqa_",
-          lname,
-          "_Q_q",
-          q,
-          "_h",
-          h,
-          "_d",
-          d
-        )
-        gqa_nms <- c(gqa_nms, nm)
-        gqa_exprs <- c(
-          gqa_exprs,
-          paste0(
-            "(",
-            paste(terms, collapse = " + "),
-            " + ",
-            bq_at(d, h),
-            ")"
-          )
-        )
-        q_nm[q, h, d] <- nm
-      }
-    }
-  }
-
-  # K projections: K[k, g, d] = sum_c kv_in[k,c] * W_k(c, d, g) + b_k(d, g)
-  k_nm <- array(NA_character_, dim = c(T_kv, num_kv, head_dim))
-  for (k in seq_len(T_kv)) {
-    for (g in seq_len(num_kv)) {
-      for (d in seq_len(head_dim)) {
-        terms <- vapply(
-          seq_len(C_in),
-          function(c) {
-            paste0(kv_at(k, c), " * ", format_numeric(wk_at(c, d, g)))
-          },
-          character(1L)
-        )
-        nm <- paste0(
-          "orbital_gqa_",
-          lname,
-          "_K_k",
-          k,
-          "_g",
-          g,
-          "_d",
-          d
-        )
-        gqa_nms <- c(gqa_nms, nm)
-        gqa_exprs <- c(
-          gqa_exprs,
-          paste0(
-            "(",
-            paste(terms, collapse = " + "),
-            " + ",
-            bk_at(d, g),
-            ")"
-          )
-        )
-        k_nm[k, g, d] <- nm
-      }
-    }
-  }
-
-  # V projections: V[k, g, d_v] = sum_c kv_in[k,c] * W_v(c, d_v, g) + b_v(d_v, g)
-  v_nm <- array(NA_character_, dim = c(T_kv, num_kv, head_dim))
-  for (k in seq_len(T_kv)) {
-    for (g in seq_len(num_kv)) {
-      for (d_v in seq_len(head_dim)) {
-        terms <- vapply(
-          seq_len(C_in),
-          function(c) {
-            paste0(kv_at(k, c), " * ", format_numeric(wv_at(c, d_v, g)))
-          },
-          character(1L)
-        )
-        nm <- paste0(
-          "orbital_gqa_",
-          lname,
-          "_V_k",
-          k,
-          "_g",
-          g,
-          "_dv",
-          d_v
-        )
-        gqa_nms <- c(gqa_nms, nm)
-        gqa_exprs <- c(
-          gqa_exprs,
-          paste0(
-            "(",
-            paste(terms, collapse = " + "),
-            " + ",
-            bv_at(d_v, g),
-            ")"
-          )
-        )
-        v_nm[k, g, d_v] <- nm
-      }
-    }
-  }
+  q_nm <- q_proj$nm_arr
+  k_nm <- k_proj$nm_arr
+  v_nm <- v_proj$nm_arr
+  gqa_nms <- c(q_proj$nms, k_proj$nms, v_proj$nms)
+  gqa_exprs <- c(q_proj$exprs, k_proj$exprs, v_proj$exprs)
 
   # Scaled dot-product attention with max-stabilised softmax.
   # Query head h uses KV group g = ((h-1) %/% heads_per_group) + 1.

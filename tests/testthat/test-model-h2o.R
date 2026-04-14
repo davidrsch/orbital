@@ -137,20 +137,23 @@ test_that("H2O dropout activation aliases map to the same inference expressions 
   )
 })
 
-test_that("mlp() h2o Maxout activation raises informative error", {
+test_that("mlp() h2o Maxout activation is translated correctly", {
   skip_if_not_installed("agua")
   skip_if_not_installed("h2o")
   skip_if_not_installed("parsnip")
   skip_if(!.h2o_available(), "H2O server not available")
 
-  spec <- parsnip::mlp(hidden_units = 4, epochs = 5, engine = "h2o")
+  spec <- parsnip::mlp(hidden_units = 4, epochs = 10, engine = "h2o")
   spec <- parsnip::set_mode(spec, "regression")
   spec <- parsnip::set_engine(spec, "h2o", activation = "Maxout")
 
   set.seed(1)
   fit <- parsnip::fit(spec, mpg ~ disp + wt + hp, mtcars)
 
-  expect_error(orbital(fit), "Maxout")
+  orb_obj <- orbital(fit)
+  preds_orb <- predict(orb_obj, mtcars)
+  preds_fit <- predict(fit, mtcars)
+  expect_equal(preds_orb$.pred, preds_fit$.pred, tolerance = 1e-5)
 })
 
 test_that("mlp() h2o engine works with multiclass probability", {
