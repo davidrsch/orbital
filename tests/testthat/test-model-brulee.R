@@ -313,3 +313,39 @@ test_that("mlp() brulee activation sweep matches predictions for additional acti
     )
   }
 })
+
+test_that("mlp() brulee_two_layer activation_2 = softmax regression matches", {
+  skip_if_not_installed("parsnip")
+  skip_if_not_installed("brulee")
+  skip_if(!torch::torch_is_installed(), "torch not installed")
+
+  # Exercises the softmax_hidden_exprs() branch in model-brulee.R and verifies
+  # that the activation_2 key is read correctly for brulee_two_layer models.
+  spec <- parsnip::mlp(
+    hidden_units = 4,
+    epochs = 20,
+    engine = "brulee_two_layer"
+  ) |>
+    parsnip::set_mode("regression") |>
+    parsnip::set_engine(
+      "brulee_two_layer",
+      hidden_units_2 = 3,
+      activation_2 = "softmax"
+    )
+
+  set.seed(1)
+  fit <- parsnip::fit(spec, mpg ~ disp + wt + hp, mtcars)
+
+  orb_obj <- orbital(fit)
+  preds <- predict(orb_obj, mtcars)
+  exps <- predict(fit, mtcars)
+
+  expect_named(preds, ".pred")
+  expect_type(preds$.pred, "double")
+
+  exps <- as.data.frame(exps)
+  rownames(preds) <- NULL
+  rownames(exps) <- NULL
+
+  expect_equal(preds, exps, tolerance = 1e-5)
+})

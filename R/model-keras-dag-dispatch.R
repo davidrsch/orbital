@@ -153,6 +153,8 @@
         do.call(.k3_categoryencoding, args)
     } else if (grepl("integerlookup", cls)) {
         do.call(.k3_integerlookup, args)
+    } else if (grepl("rescaling", cls)) {
+        do.call(.k3_rescaling, args)
     } else {
         cli::cli_abort(c(
             "Unsupported layer type in Keras Functional model: {.cls {cls_orig}}.",
@@ -166,7 +168,7 @@
                 "UnitNormalization, ZeroPadding1D, Embedding, TimeDistributed(Dense),",
                 "GroupedQueryAttention, MultiHeadAttention, Attention, AdditiveAttention, Subtract,",
                 "UpSampling1D, Dropout, SpatialDropout1D, GaussianDropout,",
-                "AlphaDropout, Flatten, Reshape, Activation, Softmax."
+                "AlphaDropout, Flatten, Reshape, Activation, Softmax, Rescaling."
             ),
             "i" = "Please file an issue: {.url https://github.com/davidrsch/orbital/issues/14}"
         ))

@@ -123,10 +123,10 @@ activation_expr <- function(
     "prelu" = {
       a <- if (is.null(alpha)) {
         cli::cli_warn(
-          "prelu: alpha not found; using default 0.01.",
+          "prelu: alpha not found; using PyTorch default 0.25.",
           class = "orbital_alpha_default"
         )
-        0.01
+        0.25
       } else {
         alpha
       }

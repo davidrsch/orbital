@@ -75,8 +75,17 @@ brulee_extract_alphas <- function(x, activations, n_h_layers) {
 orbital_brulee_mlp_impl <- function(x, mode, type, lvl, prefix) {
   coef_obj <- stats::coef(x)
   input_names <- x$dims$features
-  activations <- x$parameters$activation
   n_h_layers <- length(x$dims$h)
+  # For brulee_mlp_two_layer, the second activation is stored under the separate
+  # key "activation_2" in x$parameters rather than as a length-2 vector.
+  activations <- if (n_h_layers > 1L) {
+    c(
+      x$parameters$activation,
+      x$parameters$activation_2 %||% x$parameters$activation
+    )
+  } else {
+    x$parameters$activation
+  }
 
   alphas <- brulee_extract_alphas(x, activations, n_h_layers)
 

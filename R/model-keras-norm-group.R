@@ -263,7 +263,7 @@
   wts <- l$get_weights() # scale only (no bias)
   gamma <- as.numeric(wts[[1L]])
   n_feat <- length(in_exprs)
-  eps <- tryCatch(as.numeric(l$epsilon), error = function(e) 1e-7)
+  eps <- tryCatch(as.numeric(l$epsilon), error = function(e) 1e-8)
   expr_bt <- backtick(in_exprs)
   rms_nm <- paste0("orbital_rms_", lname)
   rms_sq_parts <- paste0(expr_bt, "^2")

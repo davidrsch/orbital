@@ -60,6 +60,25 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
       raw_input_names <- colnames(wt_mat)
 
       if (!is.null(norm_sub) && !is.null(norm_mul)) {
+        if (
+          length(norm_sub) != length(raw_input_names) ||
+            length(norm_mul) != length(raw_input_names)
+        ) {
+          cli::cli_abort(c(
+            "H2O normalisation vectors have unexpected length.",
+            "i" = paste0(
+              "norm_sub has length ",
+              length(norm_sub),
+              ", ",
+              "norm_mul has length ",
+              length(norm_mul),
+              ", but ",
+              "the weight matrix has ",
+              length(raw_input_names),
+              " input columns."
+            )
+          ))
+        }
         # Emit normalization expressions: (x - mean) * (1/sd)
         norm_names <- paste0(
           "orbital_h2o_norm_",
@@ -139,6 +158,13 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
   n_out <- length(out_pre_act)
 
   if (mode == "regression") {
+    if (length(out_pre_act) > 1L) {
+      cli::cli_abort(c(
+        "H2O multi-output regression is not yet supported by orbital.",
+        "i" = paste0("The model has ", length(out_pre_act), " output neurons."),
+        "i" = "Only single-output regression models are currently supported."
+      ))
+    }
     c(hidden_exprs, stats::setNames(out_pre_act[1L], prefix))
   } else if (n_out == 1L) {
     sigmoid_expr <- activation_expr("sigmoid", out_pre_act[1L])

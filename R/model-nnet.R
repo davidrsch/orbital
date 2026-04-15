@@ -17,6 +17,14 @@ orbital.nnet <- function(
     ))
   }
 
+  if (isTRUE(x$skip)) {
+    cli::cli_abort(c(
+      "{.fn orbital} does not support {.cls nnet} models fitted with {.code skip = TRUE}.",
+      "i" = "Skip connections change the weight vector layout in an unsupported way.",
+      "i" = "Re-fit the model with {.code skip = FALSE}."
+    ))
+  }
+
   n_in <- x$n[1L]
   n_h <- x$n[2L]
   n_out <- x$n[3L]
