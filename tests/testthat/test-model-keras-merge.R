@@ -241,4 +241,3 @@ test_that("keras3 Dot(normalize=TRUE) cosine similarity predictions match keras3
 })
 
 # ── EinsumDense layer tests (TEST-2) ─────────────────────────────────────────
-

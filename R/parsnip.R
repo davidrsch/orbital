@@ -151,7 +151,7 @@ check_mode <- function(mode, call = rlang::caller_env()) {
 
   if (!(mode %in% supported_modes)) {
     cli::cli_abort(
-      "Only models with modes {.val {supported_modes}} are supported. 
+      "Only models with modes {.val {supported_modes}} are supported.
       Not {.val {mode}}.",
       call = call
     )
@@ -168,14 +168,14 @@ check_type <- function(type, mode, call = rlang::caller_env()) {
 
   if (mode == "regression" && any(!type %in% "numeric")) {
     cli::cli_abort(
-      "{.arg type} can only be {.val numeric} for model with mode 
+      "{.arg type} can only be {.val numeric} for model with mode
 			{.val regression}, not {.val {type}}.",
       call = call
     )
   }
   if (mode == "classification" && any(!type %in% c("class", "prob"))) {
     cli::cli_abort(
-      "{.arg type} can only be {.val class} or {.val prob} for model with mode 
+      "{.arg type} can only be {.val class} or {.val prob} for model with mode
 			{.val classification}, not {.val {type}}.",
       call = call
     )

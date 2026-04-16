@@ -263,7 +263,7 @@
   wts <- l$get_weights() # scale only (no bias)
   gamma <- as.numeric(wts[[1L]])
   n_feat <- length(in_exprs)
-  eps <- tryCatch(as.numeric(l$epsilon), error = function(e) 1e-8)
+  eps <- tryCatch(as.numeric(l$epsilon), error = function(e) 1e-5)
   expr_bt <- backtick(in_exprs)
   rms_nm <- paste0("orbital_rms_", lname)
   rms_sq_parts <- paste0(expr_bt, "^2")
@@ -295,72 +295,6 @@
   state$all_exprs[[lname]] <- c(
     stats::setNames(rms_expr, rms_nm),
     stats::setNames(norm_exprs, unit_names)
-  )
-  assign(lname, unit_names, envir = expr_reg)
-  invisible(NULL)
-}
-
-
-.k3_softmax <- function(
-  l,
-  lname,
-  topo_map,
-  expr_reg,
-  state,
-  weight_map,
-  output_layer_names,
-  last_dense
-) {
-  # Standalone Softmax layer: row-wise softmax normalisation (max-stabilised)
-  # Subtracting the row-wise max before exp() prevents overflow for large logits
-  # and does not change the result (the shift cancels in numerator and denominator).
-  inbound <- topo_map[[lname]]
-  in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
-  expr_bt <- backtick(in_exprs)
-  sm_max_nm <- paste0("orbital_sm_max_", lname)
-  sm_max_expr <- paste0(
-    "do.call(pmax, list(",
-    paste(expr_bt, collapse = ", "),
-    "))"
-  )
-  sm_sum_nm <- paste0("orbital_sm_sum_", lname)
-  sm_sum_expr <- paste0(
-    "(",
-    paste0(
-      "exp(",
-      expr_bt,
-      " - `",
-      sm_max_nm,
-      "`)",
-      collapse = " + "
-    ),
-    ")"
-  )
-  unit_names <- paste0(
-    "orbital_sm_",
-    lname,
-    "_h",
-    seq_along(in_exprs)
-  )
-  sm_exprs <- vapply(
-    seq_along(in_exprs),
-    function(i) {
-      paste0(
-        "exp(",
-        expr_bt[i],
-        " - `",
-        sm_max_nm,
-        "`) / `",
-        sm_sum_nm,
-        "`"
-      )
-    },
-    character(1)
-  )
-  state$all_exprs[[lname]] <- c(
-    stats::setNames(sm_max_expr, sm_max_nm),
-    stats::setNames(sm_sum_expr, sm_sum_nm),
-    stats::setNames(sm_exprs, unit_names)
   )
   assign(lname, unit_names, envir = expr_reg)
   invisible(NULL)

@@ -135,10 +135,10 @@ test_that("H2O dropout activation aliases map to the same inference expressions 
     orbital:::activation_expr("RectifierWithDropout", "z"),
     orbital:::activation_expr("Rectifier", "z")
   )
-  expect_identical(
-    orbital:::activation_expr("MaxoutWithDropout", "z"),
-    orbital:::activation_expr("Maxout", "z")
-  )
+  # Maxout/MaxoutWithDropout are intercepted in model-h2o.R via the is_maxout
+  # flag before activation_expr() is called; they are not passed to
+  # activation_expr() during inference. End-to-end Maxout coverage is provided
+  # by the mlp() integration tests below.
 })
 
 test_that("mlp() h2o Maxout activation is translated correctly", {

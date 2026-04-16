@@ -15,7 +15,6 @@ orbital_keras_dag_impl <- function(
   lvl,
   prefix,
   feature_names,
-  all_weights,
   all_layers
 ) {
   # Build Dense weight map: layer_name → list(kernel, bias)
@@ -132,9 +131,16 @@ orbital_keras_dag_impl <- function(
       assign(lname, input_names, envir = expr_reg)
     } else {
       .keras_dag_dispatch(
-        l, cls, cls_orig, lname,
-        topo_map, expr_reg, state,
-        weight_map, output_layer_names, last_dense
+        l,
+        cls,
+        cls_orig,
+        lname,
+        topo_map,
+        expr_reg,
+        state,
+        weight_map,
+        output_layer_names,
+        last_dense
       )
     }
   }

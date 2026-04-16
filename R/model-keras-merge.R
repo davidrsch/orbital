@@ -260,7 +260,8 @@
     )
     norm_a <- paste0("sqrt(", paste(sq_a, collapse = " + "), ")")
     norm_b <- paste0("sqrt(", paste(sq_b, collapse = " + "), ")")
-    dot_expr <- paste0("(", dot_expr, " / (", norm_a, " * ", norm_b, "))")
+    denom_expr <- paste0("pmax(", norm_a, " * ", norm_b, ", 1e-12)")
+    dot_expr <- paste0("(", dot_expr, " / ", denom_expr, ")")
   }
   state$all_exprs[[lname]] <- stats::setNames(dot_expr, dot_name)
   assign(lname, dot_name, envir = expr_reg)

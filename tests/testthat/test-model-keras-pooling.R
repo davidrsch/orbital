@@ -1,4 +1,4 @@
-﻿# Integration tests for keras3 pooling: global, functional, and basic average/max pooling.
+# Integration tests for keras3 pooling: global, functional, and basic average/max pooling.
 # ZeroPadding1D/Cropping1D/UpSampling1D/Adaptive -> test-model-keras-pooling2.R
 
 
@@ -298,4 +298,3 @@ test_that("keras3 GlobalSumPooling1D predictions match keras3 predict (regressio
   preds_keras <- as.numeric(model$predict(x_mat, verbose = 0L))
   expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
 })
-

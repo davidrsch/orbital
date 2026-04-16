@@ -133,8 +133,13 @@
         ul_b_rec <- as.numeric(raw_b[2L, ])
       } else {
         ba <- as.numeric(raw_b)
-        ul_b_inp <- ba[seq_len(3L * ul_H)]
-        ul_b_rec <- ba[seq_len(3L * ul_H) + 3L * ul_H]
+        if (length(ba) >= 6L * ul_H) {
+          ul_b_inp <- ba[seq_len(3L * ul_H)]
+          ul_b_rec <- ba[seq_len(3L * ul_H) + 3L * ul_H]
+        } else {
+          ul_b_inp <- ba[seq_len(3L * ul_H)]
+          ul_b_rec <- numeric(3L * ul_H)
+        }
       }
     } else {
       ul_b_inp <- numeric(3L * ul_H)
@@ -292,4 +297,59 @@
       H = ul_H
     )
   }
+}
+
+# Flatten a 2-row bias matrix (input bias + recurrent bias) into a single
+# bias vector by summing the two rows.  Handles the case where Keras stores
+# bias as either a (2, units) matrix or a plain flat vector.
+.flatten_rnn_bias <- function(raw_b) {
+  if (!is.null(dim(raw_b)) && length(dim(raw_b)) == 2L) {
+    as.numeric(raw_b[1L, ]) + as.numeric(raw_b[2L, ])
+  } else {
+    as.numeric(raw_b)
+  }
+}
+
+# Shared masking-detection helper used by LSTM and GRU handlers.
+# Walk topo_map backwards from lname to detect whether any upstream layer
+# is a Keras Masking layer or an Embedding with mask_zero = TRUE.
+# Returns TRUE if masking is active, FALSE otherwise.
+.detect_masking_upstream <- function(lname, topo_map) {
+  visited <- character(0L)
+  to_visit <- topo_map[[lname]] %||% character(0L)
+  while (length(to_visit) > 0L) {
+    nm <- to_visit[[1L]]
+    to_visit <- to_visit[-1L]
+    if (nm %in% visited) {
+      next
+    }
+    visited <- c(visited, nm)
+    if (grepl("masking", nm, ignore.case = TRUE)) {
+      return(TRUE)
+    }
+    to_visit <- c(to_visit, topo_map[[nm]] %||% character(0L))
+  }
+  FALSE
+}
+
+# Shared guard for stateful RNN and upstream masking — used by LSTM and GRU.
+# unit_type: human-readable name ("LSTM" or "GRU") for error messages.
+.check_stateful_and_masking <- function(cfg_l, lname, topo_map, unit_type) {
+  if (isTRUE(tryCatch(as.logical(cfg_l$stateful), error = function(e) FALSE))) {
+    cli::cli_abort(c(
+      "{unit_type} layer {.val {lname}}: stateful = TRUE is not supported by orbital.",
+      "i" = "Only stateless {unit_type}s (stateful = FALSE, the Keras default) can be unrolled into SQL."
+    ))
+  }
+  if (.detect_masking_upstream(lname, topo_map)) {
+    cli::cli_warn(
+      c(
+        "{unit_type} layer {.val {lname}}: a masking layer was detected upstream.",
+        "i" = "Sequence masks are not applied in the generated SQL.",
+        "i" = "Predictions for variable-length (padded) sequences may differ from Keras."
+      ),
+      .class = "orbital_masking_ignored"
+    )
+  }
+  invisible(NULL)
 }

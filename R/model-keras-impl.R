@@ -112,7 +112,6 @@ orbital_keras_impl <- function(
         lvl,
         prefix,
         feature_names,
-        all_weights,
         all_layers
       )
     )

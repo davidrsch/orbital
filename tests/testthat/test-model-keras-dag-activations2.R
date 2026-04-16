@@ -1,4 +1,4 @@
-﻿# Integration tests for keras3 Functional models: celu, hardtanh, log_sigmoid + softmax stability.
+# Integration tests for keras3 Functional models: celu, hardtanh, log_sigmoid + softmax stability.
 # These tests are skipped when required packages are not installed.
 
 test_that("Softmax orbital expressions are numerically stable for large logits", {
@@ -123,4 +123,3 @@ test_that("keras3 Functional model with Activation('log_sigmoid') predictions ma
 })
 
 # ── Add (residual) / Dropout / Flatten / Reshape accuracy (audit rec #9) ────
-

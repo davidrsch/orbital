@@ -1,4 +1,4 @@
-﻿# Integration tests: structural layers (Add, Dropout, Flatten, Reshape, multi-output classification, SpatialDropout, GaussianDropout, AlphaDropout).
+# Integration tests: structural layers (Add, Dropout, Flatten, Reshape, multi-output classification, SpatialDropout, GaussianDropout, AlphaDropout).
 # These tests are skipped when required packages are not installed.
 
 test_that("keras3 Functional model with Add (residual) predictions match keras3 predict", {
@@ -255,4 +255,3 @@ test_that("keras3 model with AlphaDropout layer predictions match keras3 predict
 })
 
 # ── Dot (normalize=TRUE) ──────────────────────────────────────────────────────
-

@@ -1,8 +1,8 @@
-﻿# Integration tests for keras3 / kerasnip Sequential MLP models
+# Integration tests for keras3 / kerasnip Sequential MLP models
 # Activation tests -> test-model-keras-sequential-activations.R
 # EinsumDense tests -> test-model-keras-einsumdense.R
 
-#  keras3 (modern API, Sequential) 
+#  keras3 (modern API, Sequential)
 
 test_that("mlp() keras3 Sequential works with regression", {
   skip_if_no_keras3()

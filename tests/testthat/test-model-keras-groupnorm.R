@@ -1,4 +1,3 @@
-
 # ── GroupNormalization groups=n_channels path (R audit rec #4) ───────────────
 
 test_that("keras3 GroupNormalization groups=n_channels predictions match keras3 predict", {

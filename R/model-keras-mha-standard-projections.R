@@ -1,4 +1,4 @@
-﻿# Handler functions for MHA/GQA attention layers
+# Handler functions for MHA/GQA attention layers
 # (GroupedQueryAttention, MultiHeadAttention).
 # Called by orbital_keras_dag_impl() in model-keras.R.
 
@@ -38,4 +38,3 @@
     wo = .get_one("_output_dense")
   )
 }
-

@@ -4,7 +4,6 @@ orbital.xgb.Booster <- function(
   ...,
   mode = c("classification", "regression"),
   type = NULL,
-
   lvl = NULL,
   separate_trees = FALSE,
   prefix = ".pred"
@@ -34,8 +33,7 @@ orbital.xgb.Booster <- function(
       c("multi:softprob", "binary:logistic")
     )
 
-    extractor <- switch(
-      objective,
+    extractor <- switch(objective,
       "multi:softprob" = xgboost_multisoft,
       "binary:logistic" = xgboost_logistic
     )

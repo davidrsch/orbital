@@ -1,4 +1,4 @@
-﻿# Integration tests for keras3 Functional models: multi-output + Softmax + ELU.
+# Integration tests for keras3 Functional models: multi-output + Softmax + ELU.
 # These tests are skipped when required packages are not installed.
 
 test_that("keras3 Functional model with two output Dense layers produces named predictions", {
@@ -266,4 +266,3 @@ test_that("keras3 Functional model with ELU layer (alpha = 0.5) expression uses 
 })
 
 # ── Softmax max-stabilisation: overflow safety (R audit fix #3) ──────────────
-

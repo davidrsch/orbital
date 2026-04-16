@@ -50,8 +50,7 @@ activation_expr <- function(
   layer_class = NULL,
   default_value = 0
 ) {
-  switch(
-    activation,
+  switch(activation,
     "linear" = as.character(x_expr),
     "relu" = ,
     "Rectifier" = ,
@@ -124,6 +123,7 @@ activation_expr <- function(
         "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * {x_expr})"
       )
     },
+    "leakyrelu" = ,
     "leaky_relu" = {
       a <- .resolve_alpha(alpha, 0.01, "leaky_relu")
       glue::glue(
