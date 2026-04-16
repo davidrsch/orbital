@@ -140,3 +140,76 @@ test_that("keras3 LSTM (go_backwards=TRUE) produces different orbital expression
     # the symbolic expression chain must differ between the two directions.
     expect_false(identical(unclass(orb_fwd), unclass(orb_bwd)))
 })
+
+test_that("keras3 LSTM (go_backwards=TRUE, return_sequences=FALSE) predictions match keras3", {
+    skip_if_no_keras3()
+    k <- reticulate::import("keras")
+    T_len <- 3L
+    C_in <- 2L
+    H <- 4L
+    inp <- k$Input(shape = list(T_len, C_in))
+    x <- k$layers$LSTM(H, return_sequences = FALSE, go_backwards = TRUE)(inp)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    n_row <- 10L
+    x_flat <- matrix(
+        rnorm(n_row * T_len * C_in),
+        nrow = n_row,
+        ncol = T_len * C_in
+    )
+    y_vec <- rnorm(n_row)
+    x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+    model$fit(x_3d, y_vec, epochs = 3L, verbose = 0L)
+
+    feature_names <- paste0("x", seq_len(T_len * C_in))
+    df <- as.data.frame(x_flat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_3d, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-4)
+})
+
+test_that("keras3 LSTM (go_backwards=TRUE, return_sequences=TRUE) predictions match keras3", {
+    skip_if_no_keras3()
+    k <- reticulate::import("keras")
+    T_len <- 3L
+    C_in <- 2L
+    H <- 3L
+    inp <- k$Input(shape = list(T_len, C_in))
+    x <- k$layers$LSTM(H, return_sequences = TRUE, go_backwards = TRUE)(inp)
+    x <- k$layers$Flatten()(x)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+
+    set.seed(42)
+    n_row <- 10L
+    x_flat <- matrix(
+        rnorm(n_row * T_len * C_in),
+        nrow = n_row,
+        ncol = T_len * C_in
+    )
+    y_vec <- rnorm(n_row)
+    x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+    model$fit(x_3d, y_vec, epochs = 3L, verbose = 0L)
+
+    feature_names <- paste0("x", seq_len(T_len * C_in))
+    df <- as.data.frame(x_flat)
+    names(df) <- feature_names
+    orb_obj <- orbital(
+        model,
+        mode = "regression",
+        feature_names = feature_names
+    )
+    preds_orb <- predict(orb_obj, df)$.pred
+    preds_keras <- as.numeric(model$predict(x_3d, verbose = 0L))
+    expect_equal(preds_orb, preds_keras, tolerance = 1e-4)
+})

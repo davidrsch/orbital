@@ -1,4 +1,4 @@
-﻿# Shared masking-detection helper used by LSTM and GRU handlers.
+# Shared masking-detection helper used by LSTM and GRU handlers.
 # Walk topo_map backwards from lname to detect whether any upstream layer
 # is a Keras Masking layer or an Embedding with mask_zero = TRUE.
 # Returns TRUE if masking is active, FALSE otherwise.
@@ -18,6 +18,28 @@
     to_visit <- c(to_visit, topo_map[[nm]] %||% character(0L))
   }
   FALSE
+}
+
+# Shared guard for stateful RNN and upstream masking — used by LSTM and GRU.
+# unit_type: human-readable name ("LSTM" or "GRU") for error messages.
+.check_stateful_and_masking <- function(cfg_l, lname, topo_map, unit_type) {
+  if (isTRUE(tryCatch(as.logical(cfg_l$stateful), error = function(e) FALSE))) {
+    cli::cli_abort(c(
+      "{unit_type} layer {.val {lname}}: stateful = TRUE is not supported by orbital.",
+      "i" = "Only stateless {unit_type}s (stateful = FALSE, the Keras default) can be unrolled into SQL."
+    ))
+  }
+  if (.detect_masking_upstream(lname, topo_map)) {
+    cli::cli_warn(
+      c(
+        "{unit_type} layer {.val {lname}}: a masking layer was detected upstream.",
+        "i" = "Sequence masks are not applied in the generated SQL.",
+        "i" = "Predictions for variable-length (padded) sequences may differ from Keras."
+      ),
+      .class = "orbital_masking_ignored"
+    )
+  }
+  invisible(NULL)
 }
 
 .k3_bidirectional <- function(
@@ -243,6 +265,18 @@
 }
 
 
+# Flatten a 2-row bias matrix (input bias + recurrent bias) into a single
+# bias vector by summing the two rows.  Handles the case where Keras stores
+# bias as either a (2, units) matrix or a plain flat vector.
+.flatten_rnn_bias <- function(raw_b) {
+  if (!is.null(dim(raw_b)) && length(dim(raw_b)) == 2L) {
+    as.numeric(raw_b[1L, ]) + as.numeric(raw_b[2L, ])
+  } else {
+    as.numeric(raw_b)
+  }
+}
+
+
 .k3_timedistributed <- function(
   l,
   lname,
@@ -331,13 +365,76 @@
     }
     state$all_exprs[[lname]] <- stats::setNames(td_exprs, td_nms)
     assign(lname, td_nms, envir = expr_reg)
+  } else if (grepl("conv1d", inner_cls, ignore.case = TRUE)) {
+    inner_wts <- inner$get_weights()
+    if (length(inner_wts) < 1L) {
+      cli::cli_abort(
+        "Keras TimeDistributed(Conv1D) layer {.val {lname}}: no weights found."
+      )
+    }
+    # Keras3 Conv1D kernel shape: (kW, C_in, C_out)
+    kern_raw <- inner_wts[[1L]]
+    k_w <- dim(kern_raw)[1L]
+    if (k_w != 1L) {
+      cli::cli_abort(
+        "Keras TimeDistributed(Conv1D) layer {.val {lname}}: kernel_size={k_w} > 1 is not supported."
+      )
+    }
+    # Squeeze kW=1: (C_in, C_out) -> transpose to (C_out, C_in)
+    kern_td_conv <- t(kern_raw[1L, , , drop = TRUE])
+    c_out_conv <- nrow(kern_td_conv)
+    c_in_conv <- ncol(kern_td_conv)
+    bias_td_conv <- if (length(inner_wts) >= 2L) {
+      as.numeric(inner_wts[[2L]])
+    } else {
+      numeric(c_out_conv)
+    }
+    act_conv_cfg <- tryCatch(
+      inner$get_config()$activation,
+      error = function(e) NULL
+    )
+    act_conv <- if (is.null(act_conv_cfg)) {
+      "linear"
+    } else if (is.list(act_conv_cfg)) {
+      tolower(as.character(act_conv_cfg$class_name)[1L])
+    } else {
+      tolower(as.character(act_conv_cfg)[1L])
+    }
+    if (!nzchar(act_conv)) {
+      act_conv <- "linear"
+    }
+    T_steps_conv <- as.integer(length(in_exprs) / c_in_conv)
+
+    td_nms_conv <- character(0L)
+    td_exprs_conv <- character(0L)
+    for (t in seq_len(T_steps_conv)) {
+      t_in_conv <- in_exprs[((t - 1L) * c_in_conv + 1L):(t * c_in_conv)]
+      pre_act_conv <- build_mlp_pre_act(kern_td_conv, bias_td_conv, t_in_conv)
+      act_str_conv <- vapply(
+        pre_act_conv,
+        function(z) activation_expr(act_conv, z),
+        character(1L)
+      )
+      step_nms_conv <- paste0(
+        "orbital_td_",
+        lname,
+        "_t",
+        t,
+        "_h",
+        seq_len(c_out_conv)
+      )
+      td_nms_conv <- c(td_nms_conv, step_nms_conv)
+      td_exprs_conv <- c(td_exprs_conv, act_str_conv)
+    }
+    state$all_exprs[[lname]] <- stats::setNames(td_exprs_conv, td_nms_conv)
+    assign(lname, td_nms_conv, envir = expr_reg)
   } else {
     cli::cli_abort(c(
       paste0(
         "Keras TimeDistributed layer {.val {lname}} wraps unsupported inner ",
         "layer type {.cls {inner_cls}}."
       ),
-      "i" = "orbital currently supports TimeDistributed(Dense) only."
+      "i" = "orbital currently supports TimeDistributed(Dense) and TimeDistributed(Conv1D) with kernel_size=1 only."
     ))
   }
   invisible(NULL)

@@ -30,36 +30,14 @@
     # Keras 3 may return (2, 4H) matrix or a flat (4H,) vector.
     # Sum rows if matrix (input bias + recurrent bias), otherwise use as-is.
     bias_v <- if (length(wts) >= 3L) {
-        raw_b <- wts[[3L]]
-        if (!is.null(dim(raw_b)) && length(dim(raw_b)) == 2L) {
-            as.numeric(raw_b[1L, ]) + as.numeric(raw_b[2L, ])
-        } else {
-            as.numeric(raw_b)
-        }
+        .flatten_rnn_bias(wts[[3L]])
     } else {
         numeric(4L * H)
     }
 
     # Get activation config (defaults: sigmoid for gates I/F/O, tanh for C)
     cfg_l <- tryCatch(l$get_config(), error = function(e) list())
-    if (
-        isTRUE(tryCatch(as.logical(cfg_l$stateful), error = function(e) FALSE))
-    ) {
-        cli::cli_abort(c(
-            "LSTM layer {.val {lname}}: stateful = TRUE is not supported by orbital.",
-            "i" = "Only stateless LSTMs (stateful = FALSE, the Keras default) can be unrolled into SQL."
-        ))
-    }
-    if (.detect_masking_upstream(lname, topo_map)) {
-        cli::cli_warn(
-            c(
-                "LSTM layer {.val {lname}}: a masking layer was detected upstream.",
-                "i" = "Sequence masks are not applied in the generated SQL.",
-                "i" = "Predictions for variable-length (padded) sequences may differ from Keras."
-            ),
-            .class = "orbital_masking_ignored"
-        )
-    }
+    .check_stateful_and_masking(cfg_l, lname, topo_map, "LSTM")
     gate_act <- tryCatch(
         tolower(as.character(cfg_l$recurrent_activation %||% "sigmoid")),
         error = function(e) "sigmoid"
@@ -165,7 +143,11 @@
 
     state$all_exprs[[lname]] <- stats::setNames(all_lstm_exprs, all_lstm_nms)
     out_nms <- if (return_seq) {
-        unlist(all_H_nms, use.names = FALSE)
+        if (go_backwards) {
+            unlist(rev(all_H_nms), use.names = FALSE)
+        } else {
+            unlist(all_H_nms, use.names = FALSE)
+        }
     } else {
         H_prev_nms # last timestep's hidden state
     }

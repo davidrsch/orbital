@@ -49,24 +49,7 @@
 
     # Get activation config (defaults: sigmoid for Z/R, tanh for H-tilde)
     cfg_l <- tryCatch(l$get_config(), error = function(e) list())
-    if (
-        isTRUE(tryCatch(as.logical(cfg_l$stateful), error = function(e) FALSE))
-    ) {
-        cli::cli_abort(c(
-            "GRU layer {.val {lname}}: stateful = TRUE is not supported by orbital.",
-            "i" = "Only stateless GRUs (stateful = FALSE, the Keras default) can be unrolled into SQL."
-        ))
-    }
-    if (.detect_masking_upstream(lname, topo_map)) {
-        cli::cli_warn(
-            c(
-                "GRU layer {.val {lname}}: a masking layer was detected upstream.",
-                "i" = "Sequence masks are not applied in the generated SQL.",
-                "i" = "Predictions for variable-length (padded) sequences may differ from Keras."
-            ),
-            .class = "orbital_masking_ignored"
-        )
-    }
+    .check_stateful_and_masking(cfg_l, lname, topo_map, "GRU")
     gate_act <- tryCatch(
         tolower(as.character(cfg_l$recurrent_activation %||% "sigmoid")),
         error = function(e) "sigmoid"
@@ -258,7 +241,11 @@
 
     state$all_exprs[[lname]] <- stats::setNames(all_gru_exprs, all_gru_nms)
     out_nms <- if (return_seq) {
-        unlist(all_H_nms, use.names = FALSE)
+        if (go_backwards) {
+            unlist(rev(all_H_nms), use.names = FALSE)
+        } else {
+            unlist(all_H_nms, use.names = FALSE)
+        }
     } else {
         H_prev_nms
     }

@@ -27,10 +27,12 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
   maxout_size <- if (is_maxout) {
     sz <- x@parameters$maxout_size
     if (is.null(sz) || !is.numeric(sz) || sz < 2L) {
-      cli::cli_abort(c(
-        "Cannot determine {.arg maxout_size} for H2O Maxout model.",
-        "i" = "{.code x@parameters$maxout_size} is missing or < 2."
+      cli::cli_warn(c(
+        "Could not read {.arg maxout_size} from H2O model; using default 2.",
+        "i" = "H2O's documented default maxout_size is 2.",
+        "i" = "If the model was trained with a different value, predictions will be incorrect."
       ))
+      sz <- 2L
     }
     as.integer(sz)
   } else {

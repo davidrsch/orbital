@@ -55,10 +55,10 @@
     in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
     slope <- tryCatch(
         as.numeric(l$get_config()$negative_slope),
-        error = function(e) 0.01
+        error = function(e) 0.3
     )
     if (is.null(slope) || is.na(slope)) {
-        slope <- 0.01
+        slope <- 0.3
     }
     unit_names <- paste0(
         "orbital_leakyrelu_",

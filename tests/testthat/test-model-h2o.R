@@ -135,6 +135,10 @@ test_that("H2O dropout activation aliases map to the same inference expressions 
     orbital:::activation_expr("RectifierWithDropout", "z"),
     orbital:::activation_expr("Rectifier", "z")
   )
+  expect_identical(
+    orbital:::activation_expr("MaxoutWithDropout", "z"),
+    orbital:::activation_expr("Maxout", "z")
+  )
 })
 
 test_that("mlp() h2o Maxout activation is translated correctly", {
@@ -260,4 +264,47 @@ test_that("mlp() h2o standardize=FALSE passes raw predictors without normalizati
   rownames(exps) <- NULL
 
   expect_equal(preds, exps, tolerance = 1e-4)
+})
+
+test_that("mlp() h2o Sigmoid activation works", {
+  skip_if_not_installed("agua")
+  skip_if_not_installed("h2o")
+  skip_if_not_installed("parsnip")
+  skip_if(!.h2o_available(), "H2O server not available")
+
+  spec <- parsnip::mlp(hidden_units = 4, epochs = 10, engine = "h2o")
+  spec <- parsnip::set_mode(spec, "regression")
+  spec <- parsnip::set_engine(spec, "h2o", activation = "Sigmoid")
+
+  set.seed(1)
+  fit <- parsnip::fit(spec, mpg ~ disp + wt + hp, mtcars)
+
+  orb_obj <- orbital(fit)
+  preds <- predict(orb_obj, mtcars)
+  exps <- predict(fit, mtcars)
+
+  expect_named(preds, ".pred")
+  exps <- as.data.frame(exps)
+  rownames(preds) <- NULL
+  rownames(exps) <- NULL
+  expect_equal(preds, exps, tolerance = 1e-4)
+})
+
+test_that("mlp() h2o MaxoutWithDropout activation is translated correctly (inference = Maxout)", {
+  skip_if_not_installed("agua")
+  skip_if_not_installed("h2o")
+  skip_if_not_installed("parsnip")
+  skip_if(!.h2o_available(), "H2O server not available")
+
+  spec <- parsnip::mlp(hidden_units = 4, epochs = 10, engine = "h2o")
+  spec <- parsnip::set_mode(spec, "regression")
+  spec <- parsnip::set_engine(spec, "h2o", activation = "MaxoutWithDropout")
+
+  set.seed(1)
+  fit <- parsnip::fit(spec, mpg ~ disp + wt + hp, mtcars)
+
+  orb_obj <- orbital(fit)
+  preds_orb <- predict(orb_obj, mtcars)
+  preds_fit <- predict(fit, mtcars)
+  expect_equal(preds_orb$.pred, preds_fit$.pred, tolerance = 1e-5)
 })

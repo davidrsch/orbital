@@ -54,14 +54,14 @@ brulee_extract_alphas <- function(x, activations, n_h_layers) {
             }
           }
           if (is.null(prelu_val)) {
-            cli::cli_warn(
+            cli::cli_abort(
               c(
                 "PReLU weight not found in {.code coef()} output for layer {i}.",
-                "i" = "Falling back to PyTorch default init alpha = 0.25.",
-                "i" = "Full per-channel PReLU support requires an architectural change."
+                "i" = "orbital cannot determine the learned per-channel slopes.",
+                "i" = "Tried keys: {.val {paste(candidate_keys, collapse = ', ')}}.",
+                "i" = "Please file an issue with your brulee version and {.code coef()} output."
               )
             )
-            prelu_val <- 0.25
           }
           alphas[[i]] <- prelu_val
         }

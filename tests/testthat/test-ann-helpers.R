@@ -451,3 +451,42 @@ test_that("threshold default_value=0 matches the no-default-value call (Wave 1A 
   rD <- dplyr::mutate(df, r = !!rlang::parse_expr(exprDflt))$r
   expect_equal(r0, rD, tolerance = 1e-9)
 })
+
+# ── prelu ─────────────────────────────────────────────────────────────────────
+
+test_that("activation_expr: prelu with explicit alpha uses per-channel slope", {
+  expr <- activation_expr("prelu", "z", alpha = 0.1)
+  df <- data.frame(z = c(-2, 0, 2))
+  result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
+  expect_equal(result[1], -0.2, tolerance = 1e-8) # 0.1 * -2
+  expect_equal(result[2], 0, tolerance = 1e-8)
+  expect_equal(result[3], 2, tolerance = 1e-8)
+})
+
+test_that("activation_expr: prelu warns with orbital_alpha_default when alpha is NULL", {
+  expect_warning(
+    activation_expr("prelu", "z", alpha = NULL),
+    class = "orbital_alpha_default"
+  )
+})
+
+test_that("activation_expr: prelu default alpha 0.25 gives correct values", {
+  expr <- suppressWarnings(activation_expr("prelu", "z", alpha = NULL))
+  df <- data.frame(z = c(-4, 0, 4))
+  result <- dplyr::mutate(df, r = !!rlang::parse_expr(expr))$r
+  expect_equal(result[1], -1.0, tolerance = 1e-8) # 0.25 * -4
+  expect_equal(result[3], 4, tolerance = 1e-8)
+})
+
+test_that("activation_expr: prelu does not warn when alpha is provided", {
+  expect_no_warning(activation_expr("prelu", "z", alpha = 0.5))
+})
+
+# ── softmax error paths ───────────────────────────────────────────────────────
+
+test_that("activation_expr: softmax raises informative error (requires DAG path)", {
+  expect_error(
+    activation_expr("softmax", "z"),
+    regexp = "softmax"
+  )
+})

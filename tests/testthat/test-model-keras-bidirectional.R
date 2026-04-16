@@ -371,3 +371,19 @@ test_that("Bidirectional(LSTM, concat) with explicit 2-row bias matrices gives c
         tolerance = 1e-4
     )
 })
+
+test_that("keras3 Bidirectional with non-LSTM/GRU inner layer raises cli_abort", {
+    skip_if_no_keras3()
+    k <- reticulate::import("keras")
+    inp <- k$Input(shape = list(3L, 2L))
+    x <- k$layers$Bidirectional(
+        k$layers$SimpleRNN(4L)
+    )(inp)
+    out <- k$layers$Dense(1L)(x)
+    model <- k$Model(inputs = inp, outputs = out)
+    model$compile(optimizer = "adam", loss = "mse")
+    expect_error(
+        orbital(model, mode = "regression", feature_names = paste0("x", 1:6)),
+        regexp = "not LSTM or GRU"
+    )
+})

@@ -9,6 +9,16 @@
   last_dense
 ) {
   # ConvLSTM1D ─ unrolled for fixed-length sequences with spatial dim = 1.
+  #
+  # LIMITATION (spatial_dim = 1 only):
+  #   orbital only supports ConvLSTM1D when the spatial dimension S = 1.
+  #   With S = 1 and padding = "same", the spatial convolution at each
+  #   timestep reduces to a single-position dot product (using the centre
+  #   kernel row), making ConvLSTM1D equivalent to a plain LSTM after weight
+  #   slicing.  Input shapes with S > 1 are not supported; orbital will raise
+  #   a cli_abort if padding != "same" or strides != 1, which are the only
+  #   settings that keep S constant at 1.
+  #
   # Keras weight layout (IFCO gate order):
   #   kernel           : (kernel_size, in_channels, 4 * filters)
   #   recurrent_kernel : (kernel_size, filters,     4 * filters)
@@ -209,5 +219,3 @@
   assign(lname, out_nms, envir = expr_reg)
   invisible(NULL)
 }
-
-

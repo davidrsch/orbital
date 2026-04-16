@@ -152,3 +152,23 @@ test_that("mlp() nnet numerical parity holds for large hidden layer (>= 20 units
 
   expect_equal(preds, exps, tolerance = 1e-5)
 })
+
+test_that("orbital.nnet raises for models fitted with skip = TRUE", {
+  skip_if_not_installed("nnet")
+  # Construct a minimal nnet-class object with skip = TRUE.
+  # nnet::nnet() with skip = TRUE produces extra skip-connection weights;
+  # orbital cannot handle the modified weight layout.
+  set.seed(1)
+  fit <- nnet::nnet(
+    mpg ~ disp + wt,
+    data = mtcars,
+    size = 3,
+    skip = TRUE,
+    trace = FALSE,
+    linout = TRUE
+  )
+  expect_error(
+    orbital(fit, mode = "regression"),
+    regexp = "skip"
+  )
+})

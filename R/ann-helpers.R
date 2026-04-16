@@ -29,6 +29,20 @@
   glue::glue("({x_expr}) * 0.5 * (1.0 + ({erf_z}))")
 }
 
+# Resolve per-unit activation slope, warning when not found.
+# Used by elu, celu, prelu, leaky_relu, and threshold branches of activation_expr().
+.resolve_alpha <- function(alpha, default, activation_name) {
+  if (is.null(alpha)) {
+    cli::cli_warn(
+      "{activation_name}: alpha not found; using default {default}.",
+      class = "orbital_alpha_default"
+    )
+    default
+  } else {
+    alpha
+  }
+}
+
 activation_expr <- function(
   activation,
   x_expr,
@@ -50,29 +64,13 @@ activation_expr <- function(
     "Tanh" = ,
     "TanhWithDropout" = glue::glue("tanh({x_expr})"),
     "elu" = {
-      a <- if (is.null(alpha)) {
-        cli::cli_warn(
-          "elu: alpha not found; using default 1.0.",
-          class = "orbital_alpha_default"
-        )
-        1.0
-      } else {
-        alpha
-      }
+      a <- .resolve_alpha(alpha, 1.0, "elu")
       glue::glue(
         "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * (exp({x_expr}) - 1))"
       )
     },
     "celu" = {
-      a <- if (is.null(alpha)) {
-        cli::cli_warn(
-          "celu: alpha not found; using default 1.0.",
-          class = "orbital_alpha_default"
-        )
-        1.0
-      } else {
-        alpha
-      }
+      a <- .resolve_alpha(alpha, 1.0, "celu")
       glue::glue(
         "dplyr::if_else({x_expr} >= 0, {x_expr},",
         " {format_numeric(a)} * (exp({x_expr} / {format_numeric(a)}) - 1))"
@@ -121,29 +119,13 @@ activation_expr <- function(
       " dplyr::if_else({x_expr} >= 3, 1, ({x_expr} + 3) / 6))"
     ),
     "prelu" = {
-      a <- if (is.null(alpha)) {
-        cli::cli_warn(
-          "prelu: alpha not found; using PyTorch default 0.25.",
-          class = "orbital_alpha_default"
-        )
-        0.25
-      } else {
-        alpha
-      }
+      a <- .resolve_alpha(alpha, 0.25, "prelu")
       glue::glue(
         "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * {x_expr})"
       )
     },
     "leaky_relu" = {
-      a <- if (is.null(alpha)) {
-        cli::cli_warn(
-          "leaky_relu: alpha not found; using default 0.01.",
-          class = "orbital_alpha_default"
-        )
-        0.01
-      } else {
-        alpha
-      }
+      a <- .resolve_alpha(alpha, 0.01, "leaky_relu")
       glue::glue(
         "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * {x_expr})"
       )
@@ -160,15 +142,7 @@ activation_expr <- function(
     "swish" = glue::glue("{x_expr} * (1 / (1 + exp(-({x_expr}))))"),
     "exponential" = glue::glue("exp({x_expr})"),
     "threshold" = {
-      theta <- if (is.null(alpha)) {
-        cli::cli_warn(
-          "threshold: alpha not found; using default 1.0.",
-          class = "orbital_alpha_default"
-        )
-        1.0
-      } else {
-        alpha
-      }
+      theta <- .resolve_alpha(alpha, 1.0, "threshold")
       glue::glue(
         "dplyr::if_else({x_expr} > {format_numeric(theta)}, {x_expr}, {format_numeric(default_value)})"
       )

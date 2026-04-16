@@ -26,12 +26,7 @@
     ul_I <- nrow(ul_kernel)
     ul_T <- as.integer(length(ul_in_exprs) / ul_I)
     ul_bias <- if (length(ul_wts) >= 3L) {
-      raw_bias <- ul_wts[[3L]] # may be (2, 4H) matrix or flat vector
-      if (is.matrix(raw_bias) && nrow(raw_bias) == 2L) {
-        colSums(raw_bias)
-      } else {
-        as.numeric(raw_bias)
-      }
+      .flatten_rnn_bias(ul_wts[[3L]])
     } else {
       numeric(4L * ul_H)
     }
