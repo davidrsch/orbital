@@ -27,7 +27,7 @@ test_that("step_sqrt only calculates what is sufficient", {
 
   expect_identical(
     names(orbital(rec)),
-    setdiff(names(mtcars), c("mpg", 'disp'))
+    setdiff(names(mtcars), c("mpg", "disp"))
   )
 })
 

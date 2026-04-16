@@ -158,7 +158,6 @@ Then combine the extracted sizes with performance metrics to visualize the trade
 sizes <- bt_res |>
   collect_extracts() |>
   unnest(.extracts) |>
-
   summarize(sql_size = mean(.extracts), .by = .config)
 
 bt_res |>
