@@ -80,6 +80,7 @@ orbital.nnet <- function(
       res <- c(res, binary_from_prob(sigmoid_expr, "class", lvl))
     }
     if ("prob" %in% type) {
+      # Confirmed correct: parsnip::nnet_softmax (mlp.R) applies softmax to cbind(1-p, p) for binary.
       neg_expr <- glue::glue("1 - ({sigmoid_expr})")
       denom_expr <- glue::glue("exp({neg_expr}) + exp({sigmoid_expr})")
       res <- c(
@@ -128,6 +129,7 @@ orbital.nnet <- function(
       res <- c(res, orbital_tmp_class_name = softmax_class(logit_cols, lvl))
     }
     if ("prob" %in% type) {
+      # Confirmed correct: parsnip::nnet_softmax (mlp.R) re-normalises multiclass output with softmax (double-softmax is intentional).
       norm2_expr <- glue::glue_collapse(
         glue::glue("exp({raw_bt})"),
         sep = " + "

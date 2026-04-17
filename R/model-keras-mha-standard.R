@@ -26,27 +26,11 @@
   value_dim <- as.integer(cfg$value_dim %||% key_dim)
   use_bias <- isTRUE(as.logical(cfg$use_bias %||% TRUE))
 
-  in_shape <- tryCatch(
-    as.integer(unlist(l$input_shape[[1L]])),
-    error = function(e) NULL
-  )
-  C_in <- if (!is.null(in_shape)) {
-    tail(in_shape[!is.na(in_shape)], 1L)
-  } else {
-    1L
-  }
-  T_q <- as.integer(length(q_exprs) / C_in)
-  T_kv <- as.integer(length(kv_exprs) / C_in)
-
-  out_shape <- tryCatch(
-    as.integer(unlist(l$output_shape)),
-    error = function(e) NULL
-  )
-  C_out <- if (!is.null(out_shape)) {
-    tail(out_shape[!is.na(out_shape)], 1L)
-  } else {
-    C_in
-  }
+  shapes <- .mha_extract_sequence_shapes(l, q_exprs, kv_exprs)
+  C_in <- shapes$C_in
+  T_q <- shapes$T_q
+  T_kv <- shapes$T_kv
+  C_out <- shapes$C_out
 
   # Retrieve kernel and bias from an EinsumDense sub-layer (handles _attr naming).
   wts_list <- .mha_extract_sublayer_weights(l, lname, use_bias)
@@ -125,13 +109,7 @@
       "MHA {.val {lname}}: output kernel dims {wo_d} unrecognised."
     )
   }
-  bo_at <- function(do_) {
-    if (!is.null(wo$bias) && length(wo$bias) >= do_) {
-      format_numeric(wo$bias[do_])
-    } else {
-      "0"
-    }
-  }
+  bo_at <- .mha_output_bias_at(wo)
 
   # Helper: column name for an input at (timestep t, channel c)
   q_at <- function(t, c) backtick(q_exprs[(t - 1L) * C_in + c])

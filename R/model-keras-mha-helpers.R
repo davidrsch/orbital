@@ -64,3 +64,41 @@
 
   function(i2, i3) "0"
 }
+
+# Extract sequence shape variables (C_in, T_q, T_kv, C_out) shared by
+# both .k3_multiheadattention() and .k3_groupedqueryattention().
+.mha_extract_sequence_shapes <- function(l, q_exprs, kv_exprs) {
+  in_shape <- tryCatch(
+    as.integer(unlist(l$input_shape[[1L]])),
+    error = function(e) NULL
+  )
+  C_in <- if (!is.null(in_shape)) {
+    tail(in_shape[!is.na(in_shape)], 1L)
+  } else {
+    1L
+  }
+  T_q <- as.integer(length(q_exprs) / C_in)
+  T_kv <- as.integer(length(kv_exprs) / C_in)
+  out_shape <- tryCatch(
+    as.integer(unlist(l$output_shape)),
+    error = function(e) NULL
+  )
+  C_out <- if (!is.null(out_shape)) {
+    tail(out_shape[!is.na(out_shape)], 1L)
+  } else {
+    C_in
+  }
+  list(C_in = C_in, T_q = T_q, T_kv = T_kv, C_out = C_out)
+}
+
+# Build the output-projection bias accessor shared by MHA and GQA.
+# Returns function(do_) -> character scalar ("0" when bias is absent).
+.mha_output_bias_at <- function(wo) {
+  function(do_) {
+    if (!is.null(wo$bias) && length(wo$bias) >= do_) {
+      format_numeric(wo$bias[do_])
+    } else {
+      "0"
+    }
+  }
+}

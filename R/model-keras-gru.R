@@ -21,15 +21,15 @@
   #   r_t = f(x@Wr + H_prev@Rr + br)
   #   h̃_t = g(x@Wh + (r_t ⊙ H_prev)@Rh + bh)
   #   H_t = (1 − z_t) ⊙ h̃_t + z_t ⊙ H_prev
-  inbound <- topo_map[[lname]]
-  in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
-  wts <- l$get_weights() # kernel, recurrent_kernel [, bias]
-
-  kernel <- wts[[1L]] # (I, 3H)
-  rkernel <- wts[[2L]] # (H, 3H)
+  setup <- .rnn_extract_gated_setup(l, lname, topo_map, expr_reg, "GRU")
+  in_exprs <- setup$in_exprs
+  wts <- setup$wts
+  kernel <- setup$kernel
+  rkernel <- setup$rkernel
   H <- as.integer(ncol(kernel) / 3L)
-  I_feat <- nrow(kernel)
-  T_len <- as.integer(length(in_exprs) / I_feat)
+  I_feat <- setup$I_feat
+  T_len <- setup$T_len
+  cfg_l <- setup$cfg_l
 
   # Bias: (2, 3H) matrix or flat (6H) vector
   if (length(wts) >= 3L) {
@@ -47,21 +47,10 @@
     b_recur <- numeric(3L * H)
   }
 
-  # Get activation config (defaults: sigmoid for Z/R, tanh for H-tilde)
-  cfg_l <- tryCatch(l$get_config(), error = function(e) list())
-  .check_stateful_and_masking(cfg_l, lname, topo_map, "GRU")
-  gate_act <- tryCatch(
-    tolower(as.character(cfg_l$recurrent_activation %||% "sigmoid")),
-    error = function(e) "sigmoid"
-  )
-  cell_act <- tryCatch(
-    tolower(as.character(cfg_l$activation %||% "tanh")),
-    error = function(e) "tanh"
-  )
-  return_seq <- isTRUE(
-    tryCatch(as.logical(cfg_l$return_sequences), error = function(e) FALSE)
-  )
-  go_backwards <- isTRUE(cfg_l$go_backwards)
+  gate_act <- setup$gate_act
+  cell_act <- setup$cell_act
+  return_seq <- setup$return_seq
+  go_backwards <- setup$go_backwards
   # When reset_after = TRUE (the Keras 3 default), the recurrent bias for
   # the h-tilde gate is applied INSIDE the reset-gate multiplication:
   #   h̃_t = g(x@Wh + b_hx + r_t[h] * (H_prev@Rh[h] + b_hh[h]))

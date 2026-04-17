@@ -89,6 +89,13 @@
     num_groups <- 1L
   }
 
+  if (num_groups == n_feat) {
+    cli::cli_warn(c(
+      "GroupNorm groups ({num_groups}) equals the number of features ({n_feat}): each group has exactly 1 element.",
+      "i" = "This is equivalent to per-feature standardisation (InstanceNorm / LayerNorm-like)."
+    ))
+  }
+
   if (num_groups == 1L) {
     # Equivalent to LayerNorm: normalize all features together
     expr_bt <- backtick(in_exprs)

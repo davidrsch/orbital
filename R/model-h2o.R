@@ -42,6 +42,11 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
   # These are NULL when standardize = FALSE was used during training
   norm_sub <- x@model$input_norm_sub
   norm_mul <- x@model$input_norm_mul
+  if (xor(is.null(norm_sub), is.null(norm_mul))) {
+    cli::cli_abort(
+      "H2O model normalisation vectors are inconsistent; the model may be corrupted."
+    )
+  }
 
   all_exprs <- list()
   current_names <- NULL
@@ -172,6 +177,12 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
     sigmoid_expr <- activation_expr("sigmoid", out_pre_act[1L])
     c(hidden_exprs, binary_from_prob(sigmoid_expr, type, lvl))
   } else {
+    if (length(lvl) != n_out) {
+      cli::cli_abort(c(
+        "H2O model output size ({n_out}) does not match the number of classes ({length(lvl)}).",
+        "i" = "lvl must be in H2O alphabetical class order."
+      ))
+    }
     logit_exprs <- stats::setNames(out_pre_act, lvl)
     c(hidden_exprs, multiclass_from_logits(logit_exprs, type, lvl))
   }

@@ -26,7 +26,16 @@ as_qrnn_fit <- function(x) {
       "{.fn as_qrnn_fit} requires a list returned by {.fn qrnn::qrnn.fit}."
     )
   }
-  required <- c("weights", "Th", "x.center", "x.scale", "y.center", "y.scale")
+  required <- c(
+    "weights",
+    "Th",
+    "x.center",
+    "x.scale",
+    "y.center",
+    "y.scale",
+    "lower",
+    "monotone"
+  )
   missing <- setdiff(required, names(x))
   if (length(missing) > 0L) {
     cli::cli_abort(
@@ -47,7 +56,7 @@ as_qrnn_fit <- function(x) {
 #' with the trained activation, and output de-standardisation.
 #'
 #' Only single-quantile, single-hidden-layer, non-additive qrnn models
-#' (`n.trials = 1`, `additive = FALSE`) are supported.  The activation is
+#' (`n.ensemble = 1`, `additive = FALSE`, `monotone = NULL`, `lower = -Inf`) are supported.  The activation is
 #' detected automatically from the body of `m$Th`; the full set of qrnn
 #' activation functions (`sigmoid`, `logistic`, `relu`, `lrelu`, `elu`,
 #' `softplus`, `linear`) is supported.
@@ -73,9 +82,36 @@ orbital.qrnn_fit <- function(x, ..., prefix = ".pred") {
 .orbital_qrnn_impl <- function(x, prefix = ".pred") {
   weights <- x$weights
 
+  if (length(weights) > 1L) {
+    cli::cli_abort(
+      c(
+        "{.fn orbital} does not support ensemble qrnn models (n.ensemble > 1).",
+        "i" = "Fit with {.code n.ensemble = 1} (the default)."
+      )
+    )
+  }
+
   if (!is.logical(x$additive) || isTRUE(x$additive)) {
     cli::cli_abort(
       "{.fn orbital} does not support additive qrnn models ({.code additive = TRUE})."
+    )
+  }
+
+  if (!is.null(x$monotone)) {
+    cli::cli_abort(
+      c(
+        "{.fn orbital} does not support monotone-constrained qrnn models.",
+        "i" = "Fit with {.code monotone = NULL} (the default)."
+      )
+    )
+  }
+
+  if (!is.null(x$lower) && any(x$lower != -Inf)) {
+    cli::cli_abort(
+      c(
+        "{.fn orbital} does not support left-censored qrnn models.",
+        "i" = "Fit with {.code lower = -Inf} (the default)."
+      )
     )
   }
 
@@ -168,7 +204,10 @@ orbital.qrnn_fit <- function(x, ..., prefix = ".pred") {
       grepl("log1p(exp(", body_str, fixed = TRUE)
   ) {
     "softplus"
-  } else if (grepl("^\\{\\s*x\\s*\\}$", trimws(body_str))) {
+  } else if (
+    grepl("^x$", trimws(body_str)) ||
+      grepl("^\\{\\s*x\\s*\\}$", trimws(body_str))
+  ) {
     "linear"
   } else {
     cli::cli_warn(

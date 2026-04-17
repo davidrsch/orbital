@@ -270,6 +270,11 @@ test_that("mlp() brulee works with multiclass class", {
   expect_identical(preds$.pred_class, as.character(exps$.pred_class))
 })
 
+test_that("orbital_brulee_mlp_impl errors for n_h_layers > 2", {
+  # brulee only exposes activation and activation_2 parameters; > 2 layers is unsupported
+  skip("Requires a fitted brulee model with n_h_layers > 2")
+})
+
 test_that("mlp() brulee activation sweep matches predictions for additional activations", {
   skip_if_not_installed("parsnip")
   skip_if_not_installed("brulee")

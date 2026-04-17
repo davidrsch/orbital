@@ -76,6 +76,13 @@ orbital_brulee_mlp_impl <- function(x, mode, type, lvl, prefix) {
   coef_obj <- stats::coef(x)
   input_names <- x$dims$features
   n_h_layers <- length(x$dims$h)
+  if (n_h_layers > 2L) {
+    cli::cli_abort(c(
+      "brulee MLP supports at most 2 hidden layers via orbital.",
+      "i" = "n_h_layers = {n_h_layers} exceeds the supported maximum of 2."
+    ))
+  }
+
   # For brulee_mlp_two_layer, the second activation is stored under the separate
   # key "activation_2" in x$parameters rather than as a length-2 vector.
   activations <- if (n_h_layers > 1L) {

@@ -353,3 +353,44 @@
   }
   invisible(NULL)
 }
+
+# Shared setup helper for gated RNN layers (LSTM, GRU).
+# Extracts inputs, weights, and activation config; calls .check_stateful_and_masking.
+# Returns a list with: in_exprs, wts, kernel, rkernel, I_feat, T_len, cfg_l,
+#   gate_act, cell_act, return_seq, go_backwards.
+.rnn_extract_gated_setup <- function(l, lname, topo_map, expr_reg, layer_abbr) {
+  inbound <- topo_map[[lname]]
+  in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+  wts <- l$get_weights()
+  kernel <- wts[[1L]]
+  rkernel <- wts[[2L]]
+  I_feat <- nrow(kernel)
+  T_len <- as.integer(length(in_exprs) / I_feat)
+  cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+  .check_stateful_and_masking(cfg_l, lname, topo_map, layer_abbr)
+  gate_act <- tryCatch(
+    tolower(as.character(cfg_l$recurrent_activation %||% "sigmoid")),
+    error = function(e) "sigmoid"
+  )
+  cell_act <- tryCatch(
+    tolower(as.character(cfg_l$activation %||% "tanh")),
+    error = function(e) "tanh"
+  )
+  return_seq <- isTRUE(
+    tryCatch(as.logical(cfg_l$return_sequences), error = function(e) FALSE)
+  )
+  go_backwards <- isTRUE(cfg_l$go_backwards)
+  list(
+    in_exprs = in_exprs,
+    wts = wts,
+    kernel = kernel,
+    rkernel = rkernel,
+    I_feat = I_feat,
+    T_len = T_len,
+    cfg_l = cfg_l,
+    gate_act = gate_act,
+    cell_act = cell_act,
+    return_seq = return_seq,
+    go_backwards = go_backwards
+  )
+}

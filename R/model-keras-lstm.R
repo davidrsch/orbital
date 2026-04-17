@@ -18,15 +18,14 @@
   #   bias             : (4 * units,) flat OR (2, 4 * units) 2-row matrix
   #                      row 1 = input bias, row 2 = recurrent bias
   # orbital input: T * I flat columns (time-step major).
-  inbound <- topo_map[[lname]]
-  in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
-  wts <- l$get_weights() # kernel, recurrent_kernel [, bias]
-
-  kernel <- wts[[1L]] # (I, 4H)
-  rkernel <- wts[[2L]] # (H, 4H)
+  setup <- .rnn_extract_gated_setup(l, lname, topo_map, expr_reg, "LSTM")
+  in_exprs <- setup$in_exprs
+  wts <- setup$wts
+  kernel <- setup$kernel
+  rkernel <- setup$rkernel
   H <- as.integer(ncol(kernel) / 4L)
-  I_feat <- nrow(kernel)
-  T_len <- as.integer(length(in_exprs) / I_feat)
+  I_feat <- setup$I_feat
+  T_len <- setup$T_len
   # Keras 3 may return (2, 4H) matrix or a flat (4H,) vector.
   # Sum rows if matrix (input bias + recurrent bias), otherwise use as-is.
   bias_v <- if (length(wts) >= 3L) {
@@ -35,21 +34,10 @@
     numeric(4L * H)
   }
 
-  # Get activation config (defaults: sigmoid for gates I/F/O, tanh for C)
-  cfg_l <- tryCatch(l$get_config(), error = function(e) list())
-  .check_stateful_and_masking(cfg_l, lname, topo_map, "LSTM")
-  gate_act <- tryCatch(
-    tolower(as.character(cfg_l$recurrent_activation %||% "sigmoid")),
-    error = function(e) "sigmoid"
-  )
-  cell_act <- tryCatch(
-    tolower(as.character(cfg_l$activation %||% "tanh")),
-    error = function(e) "tanh"
-  )
-  return_seq <- isTRUE(
-    tryCatch(as.logical(cfg_l$return_sequences), error = function(e) FALSE)
-  )
-  go_backwards <- isTRUE(cfg_l$go_backwards)
+  gate_act <- setup$gate_act
+  cell_act <- setup$cell_act
+  return_seq <- setup$return_seq
+  go_backwards <- setup$go_backwards
 
   # IFCO gate offsets (0-indexed column starts):
   # I=0, F=H, C=2H, O=3H

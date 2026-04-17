@@ -125,7 +125,7 @@ activation_expr <- function(
     },
     "leakyrelu" = ,
     "leaky_relu" = {
-      a <- .resolve_alpha(alpha, 0.01, "leaky_relu")
+      a <- .resolve_alpha(alpha, 0.01, "leaky_relu") # 0.01 default applies only when activation is a plain string; .k3_leakyrelu() reads negative_slope from get_config() (Keras 3 default: 0.3).
       glue::glue(
         "dplyr::if_else({x_expr} >= 0, {x_expr}, {format_numeric(a)} * {x_expr})"
       )

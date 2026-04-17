@@ -308,3 +308,7 @@ test_that("mlp() h2o MaxoutWithDropout activation is translated correctly (infer
   preds_fit <- predict(fit, mtcars)
   expect_equal(preds_orb$.pred, preds_fit$.pred, tolerance = 1e-5)
 })
+
+# NOTE: A guard was added to orbital_h2o_dl_impl() that errors when
+# length(lvl) != n_out (multiclass output size mismatch). Testing this guard
+# requires a live H2O cluster so no automated test is included here.
