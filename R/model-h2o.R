@@ -26,13 +26,14 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
   is_maxout <- activation %in% c("Maxout", "MaxoutWithDropout")
   maxout_size <- if (is_maxout) {
     sz <- x@parameters$maxout_size
-    if (is.null(sz) || !is.numeric(sz) || sz < 2L) {
-      cli::cli_warn(c(
-        "Could not read {.arg maxout_size} from H2O model; using default 2.",
-        "i" = "H2O's documented default maxout_size is 2.",
-        "i" = "If the model was trained with a different value, predictions will be incorrect."
+    if (is.null(sz) || !is.numeric(sz) || length(sz) != 1L || sz < 2L) {
+      cli::cli_abort(c(
+        "Could not resolve {.arg maxout_size} from the H2O model.",
+        "x" = "orbital will not silently fall back to a default because an \
+               incorrect {.arg maxout_size} silently mispredicts.",
+        "i" = "Refit the model explicitly setting {.arg maxout_size}, or file \
+               an issue with the H2O version and {.code x@parameters} dump."
       ))
-      sz <- 2L
     }
     as.integer(sz)
   } else {
@@ -45,6 +46,16 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
   if (xor(is.null(norm_sub), is.null(norm_mul))) {
     cli::cli_abort(
       "H2O model normalisation vectors are inconsistent; the model may be corrupted."
+    )
+  }
+  if (!is.null(norm_sub) && (!is.numeric(norm_sub) || anyNA(norm_sub))) {
+    cli::cli_abort(
+      "H2O {.code input_norm_sub} is not a finite numeric vector; the model may be corrupted."
+    )
+  }
+  if (!is.null(norm_mul) && (!is.numeric(norm_mul) || anyNA(norm_mul))) {
+    cli::cli_abort(
+      "H2O {.code input_norm_mul} is not a finite numeric vector; the model may be corrupted."
     )
   }
 
@@ -183,9 +194,62 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
         "i" = "lvl must be in H2O alphabetical class order."
       ))
     }
+    h2o_levels <- h2o_response_levels(x)
+    if (!is.null(h2o_levels)) {
+      if (!setequal(as.character(lvl), as.character(h2o_levels))) {
+        cli::cli_abort(c(
+          "Class labels in {.arg lvl} do not match the H2O model's response levels.",
+          "i" = "{.arg lvl}: {.val {lvl}}",
+          "i" = "H2O levels: {.val {h2o_levels}}"
+        ))
+      }
+      if (!identical(as.character(lvl), as.character(h2o_levels))) {
+        cli::cli_abort(c(
+          "{.arg lvl} is not in the H2O model's class order.",
+          "i" = "H2O output columns are ordered as {.val {h2o_levels}}; pass \
+                 {.arg lvl} in that exact order to avoid silent misalignment."
+        ))
+      }
+    }
     logit_exprs <- stats::setNames(out_pre_act, lvl)
     c(hidden_exprs, multiclass_from_logits(logit_exprs, type, lvl))
   }
+}
+
+# Extract the response-factor levels from an H2O DeepLearning model in the
+# exact order that H2O uses for its probability columns. Returns NULL when
+# the levels cannot be determined (e.g. older H2O model layouts); callers
+# must treat NULL as "unable to verify" and not "verified".
+h2o_response_levels <- function(x) {
+  tryCatch(
+    {
+      # H2O stores per-column domains in @model$output$domains aligned with
+      # @model$output$names. The response column's domain contains the
+      # class labels in H2O's alphabetical output order.
+      response_col <- x@parameters$response_column
+      if (is.null(response_col)) {
+        response_col <- x@allparameters$response_column
+      }
+      if (is.null(response_col)) {
+        return(NULL)
+      }
+      names_vec <- x@model$output$names
+      domains <- x@model$output$domains
+      if (is.null(names_vec) || is.null(domains)) {
+        return(NULL)
+      }
+      idx <- match(response_col, names_vec)
+      if (is.na(idx)) {
+        return(NULL)
+      }
+      lev <- domains[[idx]]
+      if (is.null(lev) || !is.character(lev) || !length(lev)) {
+        return(NULL)
+      }
+      lev
+    },
+    error = function(e) NULL
+  )
 }
 
 #' @export

@@ -14,7 +14,12 @@
   # BatchNormalization: ((x - mean) / sqrt(var + eps)) * gamma + beta
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
-  wts <- l$get_weights() # gamma, beta, moving_mean, moving_var
+  wts <- .k3_get_weights(
+    l,
+    lname,
+    required = 4L,
+    names = c("gamma", "beta", "moving_mean", "moving_var")
+  )
   gamma <- as.numeric(wts[[1L]])
   beta <- as.numeric(wts[[2L]])
   mn <- as.numeric(wts[[3L]])

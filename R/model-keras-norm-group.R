@@ -15,7 +15,7 @@
   # before relying on this branch.
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
-  wts <- l$get_weights() # gamma, beta
+  wts <- .k3_get_weights(l, lname, required = 2L, names = c("gamma", "beta"))
   gamma <- as.numeric(wts[[1L]])
   beta <- as.numeric(wts[[2L]])
   n_feat <- length(in_exprs)
@@ -76,7 +76,7 @@
   # GroupNormalization: normalize within each group of features
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
-  wts <- l$get_weights() # gamma, beta
+  wts <- .k3_get_weights(l, lname, required = 2L, names = c("gamma", "beta"))
   gamma <- as.numeric(wts[[1L]])
   beta <- as.numeric(wts[[2L]])
   n_feat <- length(in_exprs)
@@ -267,7 +267,7 @@
   # y_c  = (x_c / rms) * scale_c
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
-  wts <- l$get_weights() # scale only (no bias)
+  wts <- .k3_get_weights(l, lname, required = 1L, names = c("scale"))
   gamma <- as.numeric(wts[[1L]])
   n_feat <- length(in_exprs)
   eps <- tryCatch(as.numeric(l$epsilon), error = function(e) 1e-5)

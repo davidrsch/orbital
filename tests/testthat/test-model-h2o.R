@@ -312,3 +312,115 @@ test_that("mlp() h2o MaxoutWithDropout activation is translated correctly (infer
 # NOTE: A guard was added to orbital_h2o_dl_impl() that errors when
 # length(lvl) != n_out (multiclass output size mismatch). Testing this guard
 # requires a live H2O cluster so no automated test is included here.
+
+# ---------------------------------------------------------------------------
+# Mock-based unit tests (no live H2O server required)
+# ---------------------------------------------------------------------------
+
+# Minimal S4 mock mirroring the slots that orbital reads from an
+# H2ODeepLearningModel. Defined only for the scope of these tests.
+setClass(
+  "MockH2OModel",
+  representation(
+    parameters = "list",
+    allparameters = "list",
+    model = "list"
+  )
+)
+
+make_mock_h2o <- function(
+  response_column = "Species",
+  output_names = c(
+    "sepal_length",
+    "sepal_width",
+    "petal_length",
+    "petal_width",
+    "Species"
+  ),
+  domains = list(
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    c("setosa", "versicolor", "virginica")
+  ),
+  parameters = list()
+) {
+  methods::new(
+    "MockH2OModel",
+    parameters = c(parameters, list(response_column = response_column)),
+    allparameters = list(response_column = response_column),
+    model = list(output = list(names = output_names, domains = domains))
+  )
+}
+
+test_that("h2o_response_levels() returns class levels in H2O order", {
+  mock <- make_mock_h2o()
+  expect_identical(
+    h2o_response_levels(mock),
+    c("setosa", "versicolor", "virginica")
+  )
+})
+
+test_that("h2o_response_levels() returns NULL when metadata is missing", {
+  mock_no_names <- methods::new(
+    "MockH2OModel",
+    parameters = list(response_column = "y"),
+    allparameters = list(response_column = "y"),
+    model = list(output = list(domains = list(c("a", "b"))))
+  )
+  expect_null(h2o_response_levels(mock_no_names))
+
+  mock_no_match <- make_mock_h2o(response_column = "not_in_names")
+  expect_null(h2o_response_levels(mock_no_match))
+
+  mock_no_domain <- make_mock_h2o(
+    domains = list(NULL, NULL, NULL, NULL, NULL)
+  )
+  expect_null(h2o_response_levels(mock_no_domain))
+})
+
+test_that("H2O Maxout without maxout_size aborts (no silent fallback)", {
+  # Regression test for finding H-01: previously the absence of maxout_size
+  # produced a warning + silent fallback to 2, which could mispredict.
+  mock <- methods::new(
+    "MockH2OModel",
+    parameters = list(activation = "Maxout"), # maxout_size deliberately absent
+    allparameters = list(),
+    model = list(output = list(names = character(), domains = list()))
+  )
+  expect_error(
+    orbital_h2o_dl_impl(
+      mock,
+      mode = "regression",
+      type = "numeric",
+      lvl = NULL,
+      prefix = ".pred"
+    ),
+    regexp = "maxout_size"
+  )
+})
+
+test_that("H2O input_norm_sub malformed aborts", {
+  # Regression test for finding H-03.
+  mock <- methods::new(
+    "MockH2OModel",
+    parameters = list(activation = "Rectifier"),
+    allparameters = list(),
+    model = list(
+      input_norm_sub = c(1, NA, 3),
+      input_norm_mul = c(1, 2, 3),
+      output = list(names = character(), domains = list())
+    )
+  )
+  expect_error(
+    orbital_h2o_dl_impl(
+      mock,
+      mode = "regression",
+      type = "numeric",
+      lvl = NULL,
+      prefix = ".pred"
+    ),
+    regexp = "input_norm_sub"
+  )
+})

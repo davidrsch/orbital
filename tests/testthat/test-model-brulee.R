@@ -354,3 +354,26 @@ test_that("mlp() brulee_two_layer activation_2 = softmax regression matches", {
 
   expect_equal(preds, exps, tolerance = 1e-5)
 })
+
+
+test_that("brulee: missing fc.weight raises a clear error (finding D-04)", {
+  skip_if_not_installed("brulee")
+  # Regression test: previously a corrupted/incompatible brulee fit produced
+  # an opaque NULL-subscript error. orbital now cli_abort()s with a clear
+  # message listing the missing key and the available keys.
+  fake_fit <- structure(
+    list(
+      dims = list(features = c("x1", "x2"), h = 3L, y = 1L),
+      parameters = list(activation = "relu"),
+      best_epoch = 1L,
+      estimates = list(list(fc1.bias = c(0, 0, 0))),
+      y_stats = list(mean = 0, sd = 1),
+      blueprint = structure(list(), class = "hardhat_blueprint")
+    ),
+    class = c("brulee_mlp", "list")
+  )
+  expect_error(
+    orbital(fake_fit, mode = "regression"),
+    regexp = "fc1\\.weight"
+  )
+})

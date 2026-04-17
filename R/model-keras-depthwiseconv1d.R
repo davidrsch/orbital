@@ -19,7 +19,12 @@
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
 
-  wts <- l$get_weights()
+  wts <- .k3_get_weights(
+    l,
+    lname,
+    required = 1L,
+    names = c("depthwise_kernel", "bias")
+  )
   dw_kern <- wts[[1L]] # (kW, C_in, depth_mult)
   k_w <- dim(dw_kern)[1L]
   c_in <- dim(dw_kern)[2L]

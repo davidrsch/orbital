@@ -99,9 +99,22 @@ orbital_brulee_mlp_impl <- function(x, mode, type, lvl, prefix) {
   all_exprs <- list()
   current_names <- input_names
 
+  brulee_require_coef <- function(key, layer_label) {
+    val <- coef_obj[[key]]
+    if (is.null(val)) {
+      cli::cli_abort(c(
+        "brulee fit is missing {.code {key}} required for layer {layer_label}.",
+        "i" = "The fit object may be corrupted or produced by an \
+               incompatible brulee version.",
+        "i" = "Available keys: {.val {names(coef_obj)}}."
+      ))
+    }
+    val
+  }
+
   for (i in seq_len(n_h_layers)) {
-    w <- coef_obj[[paste0("fc", i, ".weight")]]
-    b <- coef_obj[[paste0("fc", i, ".bias")]]
+    w <- brulee_require_coef(paste0("fc", i, ".weight"), paste0("hidden ", i))
+    b <- brulee_require_coef(paste0("fc", i, ".bias"), paste0("hidden ", i))
     pre_act <- build_mlp_pre_act(w, b, current_names)
     layer_names <- paste0("orbital_mlp_l", i, "_h", seq_len(nrow(w)))
     alpha_i <- if (!is.null(alphas)) alphas[[i]] else NULL
@@ -129,8 +142,8 @@ orbital_brulee_mlp_impl <- function(x, mode, type, lvl, prefix) {
   }
 
   fc_out <- n_h_layers + 1L
-  w_out <- coef_obj[[paste0("fc", fc_out, ".weight")]]
-  b_out <- coef_obj[[paste0("fc", fc_out, ".bias")]]
+  w_out <- brulee_require_coef(paste0("fc", fc_out, ".weight"), "output")
+  b_out <- brulee_require_coef(paste0("fc", fc_out, ".bias"), "output")
   out_pre_act <- build_mlp_pre_act(w_out, b_out, current_names)
 
   hidden_exprs <- unlist(all_exprs, use.names = TRUE)

@@ -23,10 +23,7 @@
     )
   }
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
-  wts <- l$get_weights()
-  if (length(wts) < 1L) {
-    cli::cli_abort("EinsumDense layer {.val {lname}} has no weights.")
-  }
+  wts <- .k3_get_weights(l, lname, required = 1L, names = c("kernel"))
   cfg_l <- tryCatch(l$get_config(), error = function(e) list())
   equation_raw <- tryCatch(
     as.character(cfg_l$equation),

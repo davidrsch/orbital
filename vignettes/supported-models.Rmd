@@ -157,6 +157,34 @@ automatically from the stored `$Th` closure.
 orbital implements this via `pmax()` (SQL `GREATEST()`), grouping the sub-units
 according to `maxout_size` from `x@parameters$maxout_size`.
 
+### Known scope and limitations
+
+**brulee — hidden-layer cap.** brulee itself exposes at most two hidden layers
+(`brulee::brulee_mlp()` and `brulee::brulee_mlp_two_layer()`). The 2-layer cap
+enforced by orbital mirrors this upstream constraint; it is not a SQL or
+translation limit.
+
+**LeakyReLU default slope.** When an activation is requested as a bare string
+(e.g. `"leaky_relu"`) without a layer config, orbital uses α = 0.01. When
+LeakyReLU appears as a Keras layer, orbital reads `negative_slope` from
+`layer$get_config()` (Keras 3's default is 0.3). This matches the upstream
+frameworks and prevents silent α drift between string-based and layer-based
+specifications.
+
+**Unsupported Keras preprocessing layers.** `StringLookup`,
+`TextVectorization`, `Hashing`, `Discretization`, and `HashedCrossing` are not
+supported. They require string manipulation, hashing, or dynamic bucketing
+semantics that cannot be expressed as portable per-row SQL. Apply these
+transformations before calling `orbital()` and feed the resulting numeric
+features directly into the model.
+
+**Structural 2-D / 3-D exclusion.** orbital targets tabular / 1-D models. 2-D
+and 3-D convolution, pooling, and padding layers (`Conv2D`, `MaxPooling2D`,
+`ZeroPadding2D`, and their 3-D analogues), as well as `Reshape` operations
+that change the row count, are rejected with a clear error rather than
+silently misbehaving. This is by design: SQL rows are atomic, so spatial
+indexing across rows cannot be emitted.
+
 ## Recipes steps
 
 ```{r}

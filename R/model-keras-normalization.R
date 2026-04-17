@@ -15,7 +15,12 @@
   # Weights from adapt(): wts[[1]] = adapt_mean, wts[[2]] = adapt_variance
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
-  wts <- l$get_weights()
+  wts <- .k3_get_weights(
+    l,
+    lname,
+    required = 2L,
+    names = c("adapt_mean", "adapt_variance")
+  )
   mn <- as.numeric(wts[[1L]])
   vr <- as.numeric(wts[[2L]])
   eps <- tryCatch(as.numeric(l$epsilon), error = function(e) 1e-3)
