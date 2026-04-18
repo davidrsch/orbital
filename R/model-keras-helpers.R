@@ -43,3 +43,59 @@
   }
   wts
 }
+
+
+# Read a Keras layer's `get_config()` and return the resulting list.
+# On failure, emits `cli::cli_warn()` with the layer name so that fallbacks
+# are visible to the caller rather than being silently substituted.
+#
+# - `l`       : the live Keras layer object (must respond to $get_config()).
+# - `lname`   : layer name (for warning context).
+# - `default` : value returned when get_config() errors. Defaults to list().
+.k3_safe_get_config <- function(l, lname, default = list()) {
+  tryCatch(
+    l$get_config(),
+    error = function(e) {
+      cli::cli_warn(
+        c(
+          "Layer {.val {lname}}: get_config() failed ({conditionMessage(e)}).",
+          i = "Falling back to defaults; inferred layer behaviour may differ from Keras."
+        )
+      )
+      default
+    }
+  )
+}
+
+
+# Validate that a Keras Softmax / Activation(softmax) layer uses axis = -1.
+# orbital's flat-column layout cannot express softmax over a non-feature
+# axis, so any other axis value would silently produce wrong results.
+#
+# - `l`     : the live Keras layer object.
+# - `lname` : layer name (for error context).
+.check_softmax_axis <- function(l, lname) {
+  cfg <- .k3_safe_get_config(l, lname)
+  axis_raw <- cfg$axis
+  if (is.null(axis_raw)) {
+    return(invisible(NULL))
+  }
+  axis_vals <- tryCatch(
+    as.integer(unlist(axis_raw)),
+    error = function(e) NA_integer_
+  )
+  if (length(axis_vals) != 1L || is.na(axis_vals)) {
+    cli::cli_abort(c(
+      "Softmax layer {.val {lname}}: unsupported axis specification {.val {axis_raw}}.",
+      i = "orbital only supports single-axis softmax on axis = -1 (the last/feature axis)."
+    ))
+  }
+  if (!(axis_vals == -1L)) {
+    cli::cli_abort(c(
+      "Softmax layer {.val {lname}}: axis = {axis_vals} is not supported.",
+      i = "orbital's flat-column layout only supports softmax over the last/feature axis (axis = -1).",
+      i = "Rebuild the model with Softmax(axis = -1) or remove the explicit axis argument."
+    ))
+  }
+  invisible(NULL)
+}

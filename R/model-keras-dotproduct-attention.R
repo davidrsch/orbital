@@ -27,6 +27,7 @@
       "Keras Attention layer {.val {lname}} requires at least 2 inbound inputs (query, value)."
     )
   }
+  .check_attention_mask(lname, topo_map, "Attention")
   q_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   v_exprs <- get(inbound[2L], envir = expr_reg, inherits = FALSE)
   k_exprs <- if (length(inbound) >= 3L) {
@@ -35,7 +36,7 @@
     v_exprs # key defaults to value
   }
 
-  cfg_att <- tryCatch(l$get_config(), error = function(e) list())
+  cfg_att <- .k3_safe_get_config(l, lname)
   use_scale_att <- tryCatch(
     as.logical(cfg_att$use_scale),
     error = function(e) FALSE

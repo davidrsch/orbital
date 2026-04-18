@@ -1,75 +1,86 @@
 # orbital methods for brulee MLP models
 
 # Try to extract per-layer activation alpha values from the brulee torch model.
-# Returns a numeric vector of length n_h_layers, or NULL if unavailable.
+# Returns a numeric vector of length n_h_layers, or NULL when the brulee object
+# does not carry a live torch model (e.g. reloaded without torch available).
+# Errors while probing an actual live model are surfaced via cli::cli_warn
+# rather than swallowed, so callers know the alpha fallback is in use.
 brulee_extract_alphas <- function(x, activations, n_h_layers) {
-  tryCatch(
-    {
-      if (is.null(x$fit) || is.null(x$fit$model)) {
-        return(NULL)
-      }
-      modules <- x$fit$model$named_modules()
-      # Collect activation modules in layer order (act1, act2, ...)
-      act_keys <- paste0("act", seq_len(n_h_layers))
-      alphas <- vector("list", n_h_layers)
-      for (i in seq_len(n_h_layers)) {
-        mod <- modules[[act_keys[i]]]
-        if (is.null(mod)) {
-          next
-        }
-        act <- activations[i]
-        if (act %in% c("leaky_relu")) {
-          ns <- tryCatch(
-            as.numeric(mod$negative_slope),
-            error = function(e) NULL
-          )
-          alphas[[i]] <- ns
-        } else if (act %in% c("elu", "celu")) {
-          a <- tryCatch(
-            as.numeric(mod$alpha),
-            error = function(e) NULL
-          )
-          alphas[[i]] <- a
-        } else if (act == "prelu") {
-          # PReLU has per-channel learnable weights; brulee exports them via
-          # coef(x) under a key like "act<i>.weight" or "prelu.weight".
-          # The full weight vector is returned so each neuron gets its own alpha.
-          coef_list <- tryCatch(stats::coef(x), error = function(e) NULL)
-          prelu_val <- NULL
-          if (!is.null(coef_list)) {
-            # Try common key patterns brulee may use for PReLU weights
-            candidate_keys <- c(
-              paste0("act", i, ".weight"),
-              "prelu.weight",
-              "weight"
-            )
-            for (k in candidate_keys) {
-              if (!is.null(coef_list[[k]])) {
-                prelu_val <- tryCatch(
-                  as.numeric(coef_list[[k]]),
-                  error = function(e) NULL
-                )
-                if (!is.null(prelu_val)) break
-              }
-            }
-          }
-          if (is.null(prelu_val)) {
-            cli::cli_abort(
-              c(
-                "PReLU weight not found in {.code coef()} output for layer {i}.",
-                "i" = "orbital cannot determine the learned per-channel slopes.",
-                "i" = "Tried keys: {.val {paste(candidate_keys, collapse = ', ')}}.",
-                "i" = "Please file an issue with your brulee version and {.code coef()} output."
-              )
-            )
-          }
-          alphas[[i]] <- prelu_val
-        }
-      }
-      alphas
-    },
-    error = function(e) NULL
+  if (is.null(x$fit) || is.null(x$fit$model)) {
+    return(NULL)
+  }
+  modules <- tryCatch(
+    x$fit$model$named_modules(),
+    error = function(e) {
+      cli::cli_warn(c(
+        "brulee MLP: could not enumerate torch modules ({conditionMessage(e)}).",
+        i = "Falling back to ONNX / parsnip default activation alphas."
+      ))
+      NULL
+    }
   )
+  if (is.null(modules)) {
+    return(NULL)
+  }
+  # Collect activation modules in layer order (act1, act2, ...)
+  act_keys <- paste0("act", seq_len(n_h_layers))
+  alphas <- vector("list", n_h_layers)
+  for (i in seq_len(n_h_layers)) {
+    mod <- modules[[act_keys[i]]]
+    if (is.null(mod)) {
+      next
+    }
+    act <- activations[i]
+    if (act %in% c("leaky_relu")) {
+      ns <- tryCatch(
+        as.numeric(mod$negative_slope),
+        error = function(e) NULL
+      )
+      alphas[[i]] <- ns
+    } else if (act %in% c("elu", "celu")) {
+      a <- tryCatch(
+        as.numeric(mod$alpha),
+        error = function(e) NULL
+      )
+      alphas[[i]] <- a
+    } else if (act == "prelu") {
+      # PReLU has per-channel learnable weights; brulee exports them via
+      # coef(x) under a key like "act<i>.weight" or "prelu.weight".
+      # The full weight vector is returned so each neuron gets its own alpha.
+      coef_list <- tryCatch(stats::coef(x), error = function(e) NULL)
+      prelu_val <- NULL
+      candidate_keys <- c(
+        paste0("act", i, ".weight"),
+        "prelu.weight",
+        "weight"
+      )
+      if (!is.null(coef_list)) {
+        # Try common key patterns brulee may use for PReLU weights
+        for (k in candidate_keys) {
+          if (!is.null(coef_list[[k]])) {
+            prelu_val <- tryCatch(
+              as.numeric(coef_list[[k]]),
+              error = function(e) NULL
+            )
+            if (!is.null(prelu_val)) break
+          }
+        }
+      }
+      if (is.null(prelu_val)) {
+        cli::cli_abort(
+          c(
+            "PReLU weight not found in {.code coef()} output for layer {i}.",
+            "i" = "orbital cannot determine the learned per-channel slopes.",
+            "i" = "Tried keys: {.val {paste(candidate_keys, collapse = ', ')}}.",
+            "i" = "Known coef() keys: {.val {paste(names(coef_list %||% list()), collapse = ', ')}}.",
+            "i" = "Please file an issue with your brulee version and {.code coef()} output."
+          )
+        )
+      }
+      alphas[[i]] <- prelu_val
+    }
+  }
+  alphas
 }
 
 orbital_brulee_mlp_impl <- function(x, mode, type, lvl, prefix) {
@@ -115,6 +126,13 @@ orbital_brulee_mlp_impl <- function(x, mode, type, lvl, prefix) {
   for (i in seq_len(n_h_layers)) {
     w <- brulee_require_coef(paste0("fc", i, ".weight"), paste0("hidden ", i))
     b <- brulee_require_coef(paste0("fc", i, ".bias"), paste0("hidden ", i))
+    if (NROW(w) != length(b)) {
+      cli::cli_abort(c(
+        "brulee hidden layer {i}: weight/bias shape mismatch.",
+        i = "fc{i}.weight has {NROW(w)} rows but fc{i}.bias has length {length(b)}.",
+        i = "The brulee fit object may be corrupted or produced by an incompatible version."
+      ))
+    }
     pre_act <- build_mlp_pre_act(w, b, current_names)
     layer_names <- paste0("orbital_mlp_l", i, "_h", seq_len(nrow(w)))
     alpha_i <- if (!is.null(alphas)) alphas[[i]] else NULL
@@ -144,6 +162,13 @@ orbital_brulee_mlp_impl <- function(x, mode, type, lvl, prefix) {
   fc_out <- n_h_layers + 1L
   w_out <- brulee_require_coef(paste0("fc", fc_out, ".weight"), "output")
   b_out <- brulee_require_coef(paste0("fc", fc_out, ".bias"), "output")
+  if (NROW(w_out) != length(b_out)) {
+    cli::cli_abort(c(
+      "brulee output layer: weight/bias shape mismatch.",
+      i = "fc{fc_out}.weight has {NROW(w_out)} rows but fc{fc_out}.bias has length {length(b_out)}.",
+      i = "The brulee fit object may be corrupted or produced by an incompatible version."
+    ))
+  }
   out_pre_act <- build_mlp_pre_act(w_out, b_out, current_names)
 
   hidden_exprs <- unlist(all_exprs, use.names = TRUE)
@@ -169,6 +194,14 @@ orbital_brulee_mlp_impl <- function(x, mode, type, lvl, prefix) {
   res
 }
 
+#' @rdname orbital
+#' @method orbital brulee_mlp
+#' @section brulee_mlp backend:
+#'   Supports up to 2 hidden layers. Activation alphas (`leaky_relu`, `elu`,
+#'   `celu`, `prelu`) are extracted from the live torch module when available,
+#'   with a warning-only fallback to parsnip / ONNX defaults when the torch
+#'   model cannot be probed. PReLU per-channel weights are honoured when
+#'   exported via [stats::coef()].
 #' @export
 orbital.brulee_mlp <- function(
   x,
@@ -189,6 +222,12 @@ orbital.brulee_mlp <- function(
   )
 }
 
+#' @rdname orbital
+#' @method orbital brulee_mlp_two_layer
+#' @section brulee_mlp_two_layer backend:
+#'   Convenience wrapper identical in behaviour to [orbital.brulee_mlp()] but
+#'   for models fitted via [brulee::brulee_mlp_two_layer()], which stores the
+#'   second hidden activation under the `activation_2` parameter slot.
 #' @export
 orbital.brulee_mlp_two_layer <- function(
   x,

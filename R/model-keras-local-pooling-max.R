@@ -81,22 +81,26 @@
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   n_f <- length(in_exprs)
+  cfg_mp <- .k3_safe_get_config(l, lname)
   pool_size <- tryCatch(
-    as.integer(l$get_config()$pool_size),
+    as.integer(cfg_mp$pool_size),
     error = function(e) NA_integer_
   )
-  if (is.na(pool_size)) {
-    pool_size <- n_f
+  if (length(pool_size) != 1L || is.na(pool_size) || pool_size < 1L) {
+    cli::cli_abort(c(
+      "Keras MaxPooling1D layer {.val {lname}}: invalid or missing pool_size.",
+      i = "get_config()$pool_size = {.val {cfg_mp$pool_size}}."
+    ))
   }
   stride <- tryCatch(
     {
-      s <- as.integer(unlist(l$get_config()$strides))[[1L]]
+      s <- as.integer(unlist(cfg_mp$strides))[[1L]]
       if (!is.na(s)) s else pool_size
     },
     error = function(e) pool_size
   )
   padding <- tryCatch(
-    tolower(as.character(l$get_config()$padding)),
+    tolower(as.character(cfg_mp$padding)),
     error = function(e) "valid"
   )
   in_shape <- tryCatch(
@@ -153,7 +157,11 @@
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
 
-  padding_raw <- tryCatch(l$get_config()$padding, error = function(e) 1L)
+  cfg_zp <- .k3_safe_get_config(l, lname)
+  padding_raw <- cfg_zp$padding
+  if (is.null(padding_raw)) {
+    padding_raw <- 1L
+  }
   if (is.list(padding_raw)) {
     padding_raw <- as.integer(unlist(padding_raw))
   } else {
@@ -227,7 +235,7 @@
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
 
-  cfg <- tryCatch(l$get_config(), error = function(e) list())
+  cfg <- .k3_safe_get_config(l, lname)
   cropping_raw <- tryCatch(
     as.integer(unlist(cfg$cropping)),
     error = function(e) c(1L, 1L)

@@ -41,7 +41,7 @@
     numeric(4L * F_filt)
   }
 
-  cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+  cfg_l <- .k3_safe_get_config(l, lname)
   pad_type <- tryCatch(
     tolower(as.character(cfg_l$padding)),
     error = function(e) "same"

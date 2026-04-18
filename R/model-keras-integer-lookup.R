@@ -15,7 +15,7 @@
   # Vocabulary sourced from config (static) or first weight tensor (adapt()).
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
-  cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+  cfg_l <- .k3_safe_get_config(l, lname)
   vocab_raw <- cfg_l$vocabulary
   if (!is.null(vocab_raw) && length(vocab_raw) > 0L) {
     vocab <- as.integer(unlist(vocab_raw))

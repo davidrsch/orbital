@@ -229,7 +229,7 @@
       "Keras Dot layer {.val {lname}}: both inputs must have the same width."
     )
   }
-  cfg <- tryCatch(l$get_config(), error = function(e) list())
+  cfg <- .k3_safe_get_config(l, lname)
   axes <- tryCatch(as.integer(cfg$axes), error = function(e) -1L)
   if (!all(axes %in% c(-1L, 1L))) {
     cli::cli_abort(

@@ -13,6 +13,7 @@
   # Input layout: time-step major (T × C_in) flat vector.
   # Weight extraction via reticulate::py_get_attr on internal EinsumDense sub-layers.
   inbound <- topo_map[[lname]]
+  .check_attention_mask(lname, topo_map, "MultiHeadAttention")
   q_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   kv_exprs <- get(
     inbound[min(2L, length(inbound))],
@@ -20,7 +21,7 @@
     inherits = FALSE
   )
 
-  cfg <- tryCatch(l$get_config(), error = function(e) list())
+  cfg <- .k3_safe_get_config(l, lname)
   num_heads <- as.integer(cfg$num_heads %||% 1L)
   key_dim <- as.integer(cfg$key_dim %||% 1L)
   value_dim <- as.integer(cfg$value_dim %||% key_dim)
@@ -48,7 +49,7 @@
 
   # Causal-mask limitation: use_causal_mask cannot be expressed as a static
   # SQL expression; abort immediately to prevent silent incorrect predictions.
-  cfg_main <- tryCatch(l$get_config(), error = function(e) list())
+  cfg_main <- .k3_safe_get_config(l, lname)
   if (isTRUE(as.logical(cfg_main$use_causal_mask %||% FALSE))) {
     cli::cli_abort(
       paste0(

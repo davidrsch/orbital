@@ -32,7 +32,7 @@
   c_out <- c_in * depth_mult
   bias_v <- if (length(wts) >= 2L) as.numeric(wts[[2L]]) else numeric(c_out)
 
-  cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+  cfg_l <- .k3_safe_get_config(l, lname)
   stride <- tryCatch(as.integer(cfg_l$strides[[1L]]), error = function(e) {
     1L
   })

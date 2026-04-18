@@ -47,7 +47,7 @@
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   in_names <- in_exprs # column-name vector
 
-  cfg <- tryCatch(l$get_config(), error = function(e) list())
+  cfg <- .k3_safe_get_config(l, lname)
   dims <- tryCatch(as.integer(unlist(cfg$dims)), error = function(e) {
     c(1L, 2L)
   })
@@ -109,7 +109,7 @@
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
 
-  cfg <- tryCatch(l$get_config(), error = function(e) list())
+  cfg <- .k3_safe_get_config(l, lname)
   n_rep <- tryCatch(as.integer(cfg[["n"]]), error = function(e) 1L)
   if (is.na(n_rep) || n_rep < 1L) {
     cli::cli_abort(

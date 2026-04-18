@@ -332,8 +332,8 @@
   FALSE
 }
 
-# Shared guard for stateful RNN and upstream masking — used by LSTM and GRU.
-# unit_type: human-readable name ("LSTM" or "GRU") for error messages.
+# Shared guard for stateful RNN and upstream masking — used by LSTM, GRU, and SimpleRNN.
+# unit_type: human-readable name ("LSTM" | "GRU" | "SimpleRNN") for error messages.
 .check_stateful_and_masking <- function(cfg_l, lname, topo_map, unit_type) {
   if (isTRUE(tryCatch(as.logical(cfg_l$stateful), error = function(e) FALSE))) {
     cli::cli_abort(c(
@@ -342,14 +342,33 @@
     ))
   }
   if (.detect_masking_upstream(lname, topo_map)) {
-    cli::cli_warn(
+    cli::cli_abort(
       c(
         "{unit_type} layer {.val {lname}}: a masking layer was detected upstream.",
-        "i" = "Sequence masks are not applied in the generated SQL.",
-        "i" = "Predictions for variable-length (padded) sequences may differ from Keras."
+        "i" = "Sequence masks cannot be applied in the generated SQL.",
+        "i" = "Predictions for variable-length (padded) sequences would differ from Keras.",
+        "i" = "Remove the upstream Masking / Embedding(mask_zero=TRUE) or pre-mask inputs before calling orbital()."
       ),
       .class = "orbital_masking_ignored"
     )
+  }
+  invisible(NULL)
+}
+
+
+# Shared guard: reject any attention layer whose sequence path includes a
+# Keras Masking layer or an Embedding with mask_zero = TRUE.  Attention masks
+# (including the `attention_mask` kwarg and upstream mask propagation) are not
+# applied in the generated SQL, which would silently produce wrong results
+# on padded sequences.
+.check_attention_mask <- function(lname, topo_map, layer_kind) {
+  if (.detect_masking_upstream(lname, topo_map)) {
+    cli::cli_abort(c(
+      "{layer_kind} layer {.val {lname}}: attention masking is not supported by orbital.",
+      "i" = "A Keras Masking layer or Embedding(mask_zero = TRUE) was detected upstream.",
+      "i" = "Attention masks cannot be applied in the generated SQL; padded sequences would produce silently wrong results.",
+      "i" = "Remove upstream masking, or pre-mask inputs before calling orbital()."
+    ))
   }
   invisible(NULL)
 }
@@ -366,7 +385,7 @@
   rkernel <- wts[[2L]]
   I_feat <- nrow(kernel)
   T_len <- as.integer(length(in_exprs) / I_feat)
-  cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+  cfg_l <- .k3_safe_get_config(l, lname)
   .check_stateful_and_masking(cfg_l, lname, topo_map, layer_abbr)
   gate_act <- tryCatch(
     tolower(as.character(cfg_l$recurrent_activation %||% "sigmoid")),

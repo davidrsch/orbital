@@ -1,3 +1,13 @@
+#' @rdname orbital
+#' @method orbital nnet
+#' @section nnet backend:
+#'   Supports single-hidden-layer MLPs fitted with `skip = FALSE`. orbital
+#'   refuses models with unsupported output-activation combinations:
+#'   regression requires `linout = TRUE`; classification requires
+#'   `linout = FALSE`, `softmax = FALSE` for binary (1 output) and
+#'   `softmax = TRUE` for multi-class. `censored = TRUE` is not supported.
+#'   `x$entropy` (loss-function flag) is intentionally ignored because it does
+#'   not affect inference-time outputs.
 #' @export
 orbital.nnet <- function(
   x,
@@ -24,6 +34,84 @@ orbital.nnet <- function(
       "i" = "Re-fit the model with {.code skip = FALSE}."
     ))
   }
+
+  # ----------------------------------------------------------------------------
+  # Output activation validation.
+  #
+  # nnet applies different output transforms depending on `linout`, `softmax`,
+  # and `censored` (see ?nnet::nnet). orbital's expression builder assumes
+  # specific defaults per-mode; other combinations would silently produce
+  # wrong predictions, so we refuse them up front.
+  #
+  # Supported combinations:
+  #   mode = "regression"     : linout = TRUE, softmax = FALSE  (raw linear output)
+  #   mode = "classification" : linout = FALSE, softmax = FALSE for n_out == 1
+  #                             (internal sigmoid, parsnip softmaxes to 2 classes)
+  #   mode = "classification" : linout = FALSE, softmax = TRUE  for n_out > 1
+  #                             (internal softmax, parsnip re-softmaxes)
+  # Anything else is refused rather than silently miscompiled.
+  # ----------------------------------------------------------------------------
+  linout <- isTRUE(x$linout)
+  softmax_flag <- isTRUE(x$softmax)
+  censored <- isTRUE(x$censored)
+  entropy <- isTRUE(x$entropy)
+
+  if (censored) {
+    cli::cli_abort(c(
+      "{.fn orbital} does not support {.cls nnet} models fitted with {.code censored = TRUE}.",
+      "i" = "The censored multinomial output transform is not implemented."
+    ))
+  }
+
+  if (mode == "regression") {
+    if (!linout) {
+      cli::cli_abort(c(
+        "{.fn orbital} for {.pkg nnet} regression requires {.code linout = TRUE}.",
+        "x" = "Got {.code linout = FALSE}; nnet would internally apply a \
+               logistic squash to the output, so emitting the raw pre-activation \
+               would produce silently wrong predictions.",
+        "i" = "Re-fit with {.code nnet::nnet(..., linout = TRUE)} (parsnip / \
+               {.code mlp(mode = \"regression\", engine = \"nnet\")} does this \
+               automatically)."
+      ))
+    }
+    if (softmax_flag) {
+      cli::cli_abort(c(
+        "{.fn orbital} for {.pkg nnet} regression does not support \
+         {.code softmax = TRUE} (got {.code softmax = TRUE}).",
+        "i" = "Re-fit with {.code softmax = FALSE}."
+      ))
+    }
+  } else if (mode == "classification") {
+    if (linout) {
+      cli::cli_abort(c(
+        "{.fn orbital} for {.pkg nnet} classification requires {.code linout = FALSE}.",
+        "x" = "Got {.code linout = TRUE}; with a linear output nnet would not \
+               apply the sigmoid / softmax normalisation that parsnip expects."
+      ))
+    }
+    n_out_tmp <- x$n[3L]
+    if (n_out_tmp == 1L && softmax_flag) {
+      cli::cli_abort(c(
+        "{.fn orbital} for binary {.pkg nnet} classification (n_out = 1) \
+         expects {.code softmax = FALSE} (nnet emits a single sigmoid unit).",
+        "x" = "Got {.code softmax = TRUE}."
+      ))
+    }
+    if (n_out_tmp > 1L && !softmax_flag) {
+      cli::cli_abort(c(
+        "{.fn orbital} for multi-class {.pkg nnet} classification (n_out = {n_out_tmp}) \
+         expects {.code softmax = TRUE}.",
+        "x" = "Got {.code softmax = FALSE}; outputs would be independent logistic units \
+              rather than a softmax simplex."
+      ))
+    }
+  }
+
+  # x$entropy toggles the loss function during fitting (cross-entropy vs SSE);
+  # it does not change the inference-time output transform, so orbital can
+  # safely ignore it. Recorded here for transparency.
+  invisible(entropy)
 
   n_in <- x$n[1L]
   n_h <- x$n[2L]

@@ -32,7 +32,7 @@
     )
   }
 
-  cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+  cfg_l <- .k3_safe_get_config(l, lname)
   merge_mode <- tryCatch(
     tolower(as.character(cfg_l$merge_mode)),
     error = function(e) "concat"

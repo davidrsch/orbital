@@ -134,12 +134,13 @@
   #   out  = if max_value set: if_else(base > max_value, max_value, base)
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
+  cfg_relu <- .k3_safe_get_config(l, lname)
   ns <- tryCatch(
-    as.numeric(l$get_config()$negative_slope),
+    as.numeric(cfg_relu$negative_slope),
     error = function(e) 0.0
   )
   thr <- tryCatch(
-    as.numeric(l$get_config()$threshold),
+    as.numeric(cfg_relu$threshold),
     error = function(e) 0.0
   )
   if (is.null(ns) || length(ns) == 0L || is.na(ns)) {
@@ -148,7 +149,7 @@
   if (is.null(thr) || length(thr) == 0L || is.na(thr)) {
     thr <- 0.0
   }
-  mv_raw <- tryCatch(l$get_config()$max_value, error = function(e) NULL)
+  mv_raw <- cfg_relu$max_value
   mv_finite <- !is.null(mv_raw) &&
     length(mv_raw) > 0L &&
     !is.na(suppressWarnings(as.numeric(mv_raw)[[1L]]))
@@ -221,6 +222,7 @@
     activation <- "linear"
   }
   if (activation %in% c("softmax", "log_softmax")) {
+    .check_softmax_axis(l, lname)
     expr_bt <- backtick(in_exprs)
     # Max-stabilisation: subtract max(logits) before exp() so that
     # exp() never overflows and results are numerically identical to
@@ -342,6 +344,10 @@
   # Standalone Softmax layer: row-wise softmax normalisation (max-stabilised)
   # Subtracting the row-wise max before exp() prevents overflow for large logits
   # and does not change the result (the shift cancels in numerator and denominator).
+  # Only axis = -1 (the last/feature axis) is supported; any other axis would
+  # normalise across a non-feature dimension that orbital's flat-column layout
+  # cannot represent without silently producing wrong results.
+  .check_softmax_axis(l, lname)
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   expr_bt <- backtick(in_exprs)

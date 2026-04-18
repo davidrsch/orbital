@@ -35,6 +35,12 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
                an issue with the H2O version and {.code x@parameters} dump."
       ))
     }
+    if (sz > .Machine$integer.max || sz != floor(sz)) {
+      cli::cli_abort(c(
+        "H2O {.arg maxout_size} = {.val {sz}} is not a representable positive integer.",
+        i = "Expected a small positive integer (typically 2-5)."
+      ))
+    }
     as.integer(sz)
   } else {
     NULL
@@ -195,7 +201,18 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
       ))
     }
     h2o_levels <- h2o_response_levels(x)
-    if (!is.null(h2o_levels)) {
+    if (is.null(h2o_levels)) {
+      cli::cli_warn(c(
+        "H2O class-order verification skipped: response levels could not be \
+         extracted from the model object.",
+        i = "orbital will trust {.arg lvl} = {.val {lvl}} to be in H2O's \
+            alphabetical output order.",
+        i = "If this ordering is wrong, multi-class probability columns will \
+            be silently misaligned.",
+        i = "File an issue with your H2O version and {.code x@model$output} \
+            structure if you hit this."
+      ))
+    } else {
       if (!setequal(as.character(lvl), as.character(h2o_levels))) {
         cli::cli_abort(c(
           "Class labels in {.arg lvl} do not match the H2O model's response levels.",
@@ -252,6 +269,15 @@ h2o_response_levels <- function(x) {
   )
 }
 
+#' @rdname orbital
+#' @method orbital H2ODeepLearningModel
+#' @section H2O DeepLearning backend:
+#'   Supports hidden activations `"Rectifier"` / `"RectifierWithDropout"`,
+#'   `"Tanh"` / `"TanhWithDropout"`, and `"Maxout"` / `"MaxoutWithDropout"`
+#'   (requires `maxout_size` to be recoverable from the fit). `"Sigmoid"` is
+#'   accepted via the generic activation table but is not a standard H2O
+#'   choice; verify the fit path if your model reports it. Multi-output
+#'   regression is explicitly rejected.
 #' @export
 orbital.H2ODeepLearningModel <- function(
   x,

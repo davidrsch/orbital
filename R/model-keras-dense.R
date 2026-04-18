@@ -24,7 +24,7 @@
   }
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   wts <- .k3_get_weights(l, lname, required = 1L, names = c("kernel"))
-  cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+  cfg_l <- .k3_safe_get_config(l, lname)
   equation_raw <- tryCatch(
     as.character(cfg_l$equation),
     error = function(e) ""

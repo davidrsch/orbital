@@ -21,6 +21,7 @@
       "Keras AdditiveAttention layer {.val {lname}} requires at least 2 inbound inputs (query, value)."
     )
   }
+  .check_attention_mask(lname, topo_map, "AdditiveAttention")
   q_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   v_exprs <- get(inbound[2L], envir = expr_reg, inherits = FALSE)
   k_exprs <- if (length(inbound) >= 3L) {
@@ -29,14 +30,21 @@
     v_exprs
   }
 
-  cfg_aa <- tryCatch(l$get_config(), error = function(e) list())
+  cfg_aa <- .k3_safe_get_config(l, lname)
   use_scale_aa <- tryCatch(
     as.logical(cfg_aa$use_scale),
     error = function(e) FALSE
   )
   aa_scale <- if (isTRUE(use_scale_aa)) {
-    wts_aa <- tryCatch(l$get_weights(), error = function(e) list())
-    if (length(wts_aa) >= 1L) as.numeric(wts_aa[[1L]])[1L] else 1.0
+    wts_aa <- l$get_weights()
+    if (length(wts_aa) < 1L) {
+      cli::cli_abort(c(
+        "Keras AdditiveAttention layer {.val {lname}}: use_scale = TRUE but no scale weight was exported.",
+        i = "Expected at least 1 weight tensor; got {length(wts_aa)}.",
+        i = "Rebuild / retrain the model so the additive-attention scale is materialised."
+      ))
+    }
+    as.numeric(wts_aa[[1L]])[1L]
   } else {
     1.0
   }

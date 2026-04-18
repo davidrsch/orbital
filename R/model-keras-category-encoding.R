@@ -15,7 +15,7 @@
   # For single input: output_k = as.integer(x == k) for k in 0..num_tokens-1.
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
-  cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+  cfg_l <- .k3_safe_get_config(l, lname)
   num_tokens <- as.integer(cfg_l$num_tokens)
   output_mode <- tolower(as.character(cfg_l$output_mode))
   if (output_mode == "count") {

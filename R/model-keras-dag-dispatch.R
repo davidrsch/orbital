@@ -156,6 +156,11 @@
   } else if (grepl("rescaling", cls)) {
     do.call(.k3_rescaling, args)
   } else {
+    # NOTE: The human-readable list below is intentionally hardcoded because it
+    # appears verbatim in a user-facing error message. When you add a new
+    # `grepl(...)` branch above, update this list so the message stays accurate.
+    # See tests/testthat/test-model-keras-dag-softmax-axis-timedist.R for a
+    # smoke-test that confirms the dispatcher rejects unknown classes.
     cli::cli_abort(c(
       "Unsupported layer type in Keras Functional model: {.cls {cls_orig}}.",
       "i" = paste(

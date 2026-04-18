@@ -20,7 +20,8 @@
   I_feat <- nrow(kernel)
   T_len <- as.integer(length(in_exprs) / I_feat)
   bias_v <- if (length(wts) >= 3L) as.numeric(wts[[3L]]) else numeric(H)
-  cfg_l <- tryCatch(l$get_config(), error = function(e) list())
+  cfg_l <- .k3_safe_get_config(l, lname)
+  .check_stateful_and_masking(cfg_l, lname, topo_map, "SimpleRNN")
   activation <- tryCatch(
     tolower(as.character(cfg_l$activation %||% "tanh")),
     error = function(e) "tanh"

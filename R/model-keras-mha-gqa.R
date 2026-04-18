@@ -13,6 +13,7 @@
   # For query head h (1-indexed), KV group = ((h-1) %/% heads_per_group) + 1.
   # Weight axes accessed via EinsumDense sub-layers (same names as MHA).
   inbound <- topo_map[[lname]]
+  .check_attention_mask(lname, topo_map, "GroupedQueryAttention")
   q_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
   kv_exprs <- get(
     inbound[min(2L, length(inbound))],
@@ -20,7 +21,7 @@
     inherits = FALSE
   )
 
-  cfg <- tryCatch(l$get_config(), error = function(e) list())
+  cfg <- .k3_safe_get_config(l, lname)
   num_heads <- as.integer(cfg$num_heads %||% 1L)
   head_dim <- as.integer(cfg$head_dim %||% 1L)
   num_kv <- as.integer(cfg$num_query_groups %||% num_heads)

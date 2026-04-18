@@ -8,9 +8,19 @@
 
 - `orbital()` now supports `qrnn` models via [qrnn::qrnn.fit()]. Because `qrnn.fit()` returns a plain list with no S3 class, wrap the result with `as_qrnn_fit()` before passing to `orbital()`.
 
+- `orbital()` now supports `mlp(engine = "brulee")` and `brulee::brulee_mlp_two_layer()` models (up to 2 hidden layers). Per-layer activation `alpha` values (LeakyReLU, ELU, CELU, PReLU) are extracted from the live torch module when available; PReLU per-channel slopes are honoured.
+
+- `orbital()` now supports `mlp(engine = "nnet")` and direct `nnet::nnet()` models (single hidden layer, `skip = FALSE`). The handler validates `linout`, `softmax`, and `censored` against the requested mode and refuses unsupported combinations rather than silently miscompiling outputs.
+
+- `orbital()` now supports `h2o::h2o.deeplearning()` models via the `agua` package. Hidden activations `Rectifier`/`RectifierWithDropout`, `Tanh`/`TanhWithDropout`, and `Maxout`/`MaxoutWithDropout` (with `maxout_size`) are supported. Multi-class class-order verification emits a warning when the H2O response domain cannot be read back from the model object. Multi-output regression is explicitly rejected.
+
 ## Known limitations
 
 - **`MultiHeadAttention` and `use_causal_mask`**: In Keras 3, `use_causal_mask` is a call-time argument passed to `layer.__call__()` and is **not** stored in the saved layer config. As a result, `orbital()` cannot detect or enforce the causal mask at prediction time. If your model was trained with `use_causal_mask = TRUE`, the orbital translation will produce predictions that ignore the mask (attending to all positions, including future ones). A warning is emitted when `orbital()` encounters a `MultiHeadAttention` layer to draw attention to this limitation.
+
+- **Keras `attention_mask` / recurrent masking**: orbital does not honour an explicit `attention_mask` argument passed to `MultiHeadAttention`/`GroupQueryAttention`/`Attention`/`AdditiveAttention`, nor does it honour upstream `Masking` / `mask_zero = TRUE` embeddings feeding `LSTM`/`GRU`/`SimpleRNN`. These configurations are refused with a clear error rather than silently ignored.
+
+- **Keras `Softmax` axis**: only `axis = -1` (the last / feature axis) is supported. Other axis values are rejected at translation time because orbital's flat-column layout cannot express them.
 
 # orbital 0.5.0
 
