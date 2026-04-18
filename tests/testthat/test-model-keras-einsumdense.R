@@ -1,4 +1,4 @@
-﻿# Integration tests for keras3 EinsumDense layers
+# Integration tests for keras3 EinsumDense layers
 # These tests are skipped when required packages are not installed.
 
 test_that("keras3 EinsumDense (ab,bc->ac) predictions match keras3 predict", {

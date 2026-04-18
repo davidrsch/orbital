@@ -1,4 +1,4 @@
-﻿# Integration tests for keras3 EinsumDense in DAG (Functional) models.
+# Integration tests for keras3 EinsumDense in DAG (Functional) models.
 # These tests are skipped when required packages are not installed.
 
 test_that("keras3 EinsumDense intermediate layer (ab,bc->ac, relu) predictions match keras3 predict", {

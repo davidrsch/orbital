@@ -1,4 +1,4 @@
-﻿# Integration tests for keras3 SimpleRNN and masking-related layers.
+# Integration tests for keras3 SimpleRNN and masking-related layers.
 # LSTM → test-model-keras-lstm.R
 # GRU → test-model-keras-gru.R
 # Bidirectional → test-model-keras-bidirectional.R

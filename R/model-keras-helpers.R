@@ -2,15 +2,19 @@
 # Centralises tensor-weight extraction so every .k3_* handler validates
 # weight arity with a consistent, user-readable error.
 
-# Read a Keras layer's `get_weights()` list, verify it has at least
-# `required` tensors, and return it. The `names` argument (optional) labels
-# what each expected weight represents for the abort message.
-#
-# - `l`       : the live Keras layer object (must respond to $get_weights()).
-# - `lname`   : layer name (for error context).
-# - `required`: minimum number of weight tensors the handler needs.
-# - `names`   : optional character vector of labels for the expected tensors
-#              (e.g. c("kernel", "bias")); used only to decorate errors.
+#' Read and validate a Keras layer's weight tensors.
+#'
+#' Centralises tensor-weight extraction so every `.k3_*` handler validates
+#' weight arity with a consistent, user-readable error.
+#'
+#' @param l The live Keras layer object (must respond to `$get_weights()`).
+#' @param lname Layer name (for error context).
+#' @param required Minimum number of weight tensors the handler needs.
+#' @param names Optional character vector of labels for the expected tensors
+#'   (e.g. `c("kernel", "bias")`); used only to decorate errors.
+#' @return The list returned by `l$get_weights()`.
+#' @keywords internal
+#' @noRd
 .k3_get_weights <- function(l, lname, required, names = NULL) {
   wts <- tryCatch(l$get_weights(), error = function(e) {
     cli::cli_abort(
@@ -45,13 +49,18 @@
 }
 
 
-# Read a Keras layer's `get_config()` and return the resulting list.
-# On failure, emits `cli::cli_warn()` with the layer name so that fallbacks
-# are visible to the caller rather than being silently substituted.
-#
-# - `l`       : the live Keras layer object (must respond to $get_config()).
-# - `lname`   : layer name (for warning context).
-# - `default` : value returned when get_config() errors. Defaults to list().
+#' Safely read a Keras layer's configuration.
+#'
+#' Wraps `l$get_config()` so that failures emit `cli::cli_warn()` with the
+#' layer name and fall back to a caller-supplied default, rather than
+#' silently substituting `list()`.
+#'
+#' @param l The live Keras layer object.
+#' @param lname Layer name (for warning context).
+#' @param default Value returned when `get_config()` errors. Defaults to `list()`.
+#' @return The config list, or `default` on failure.
+#' @keywords internal
+#' @noRd
 .k3_safe_get_config <- function(l, lname, default = list()) {
   tryCatch(
     l$get_config(),
@@ -68,12 +77,17 @@
 }
 
 
-# Validate that a Keras Softmax / Activation(softmax) layer uses axis = -1.
-# orbital's flat-column layout cannot express softmax over a non-feature
-# axis, so any other axis value would silently produce wrong results.
-#
-# - `l`     : the live Keras layer object.
-# - `lname` : layer name (for error context).
+#' Validate that a Keras Softmax / Activation(softmax) layer uses `axis = -1`.
+#'
+#' orbital's flat-column layout cannot express softmax over a non-feature
+#' axis, so any other axis value would silently produce wrong results. This
+#' helper aborts with a guiding message in that case.
+#'
+#' @param l The live Keras layer object.
+#' @param lname Layer name (for error context).
+#' @return Invisibly `NULL`.
+#' @keywords internal
+#' @noRd
 .check_softmax_axis <- function(l, lname) {
   cfg <- .k3_safe_get_config(l, lname)
   axis_raw <- cfg$axis

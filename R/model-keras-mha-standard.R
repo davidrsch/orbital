@@ -1,4 +1,4 @@
-﻿.k3_multiheadattention <- function(
+.k3_multiheadattention <- function(
   l,
   lname,
   topo_map,
@@ -97,24 +97,21 @@
   bv_at <- .mha_bias_accessor2(wv$bias, value_dim, num_heads)
 
   # Output projection: (num_heads, value_dim, C_out) or transposed.
-  wo_d <- dim(wo$kernel)
-  if (length(wo_d) == 3L && wo_d[1L] == num_heads && wo_d[2L] == value_dim) {
-    wo_at <- function(h, dv, do_) wo$kernel[h, dv, do_]
-    C_out_w <- wo_d[3L]
-  } else if (length(wo_d) == 3L && wo_d[1L] == C_out && wo_d[2L] == num_heads) {
-    # (C_out, num_heads, value_dim) layout
-    wo_at <- function(h, dv, do_) wo$kernel[do_, h, dv]
-    C_out_w <- wo_d[1L]
-  } else {
-    cli::cli_abort(
-      "MHA {.val {lname}}: output kernel dims {wo_d} unrecognised."
-    )
-  }
+  wo_resolved <- .mha_resolve_output_kernel(
+    wo,
+    num_heads,
+    value_dim,
+    C_out,
+    lname,
+    layer_abbr = "MHA"
+  )
+  wo_at <- wo_resolved$wo_at
+  C_out_w <- wo_resolved$C_out_w
   bo_at <- .mha_output_bias_at(wo)
 
   # Helper: column name for an input at (timestep t, channel c)
-  q_at <- function(t, c) backtick(q_exprs[(t - 1L) * C_in + c])
-  kv_at <- function(t, c) backtick(kv_exprs[(t - 1L) * C_in + c])
+  q_at <- .mha_input_accessor(q_exprs, C_in)
+  kv_at <- .mha_input_accessor(kv_exprs, C_in)
 
   mha_nms <- character(0)
   mha_exprs <- character(0)

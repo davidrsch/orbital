@@ -190,10 +190,19 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
       ))
     }
     c(hidden_exprs, stats::setNames(out_pre_act[1L], prefix))
-  } else if (n_out == 1L) {
-    sigmoid_expr <- activation_expr("sigmoid", out_pre_act[1L])
-    c(hidden_exprs, binary_from_prob(sigmoid_expr, type, lvl))
   } else {
+    # H2O emits one output neuron per class for classification (including
+    # binary, which produces 2 columns: p0, p1). A single-output
+    # classification head is therefore structurally unreachable from
+    # parsnip-produced H2O models and is not supported by orbital.
+    if (n_out < 2L) {
+      cli::cli_abort(c(
+        "H2O classification expects >= 2 output neurons.",
+        "i" = "Got n_out = {n_out}. H2O always emits one column per class,",
+        "i" = "including for binary (2 columns). A single-output head is not",
+        "i" = "producible from parsnip and is not supported."
+      ))
+    }
     if (length(lvl) != n_out) {
       cli::cli_abort(c(
         "H2O model output size ({n_out}) does not match the number of classes ({length(lvl)}).",

@@ -1,4 +1,4 @@
-﻿.k3_groupedqueryattention <- function(
+.k3_groupedqueryattention <- function(
   l,
   lname,
   topo_map,
@@ -94,22 +94,20 @@
   bk_at <- .mha_bias_accessor2(wk$bias, head_dim, num_kv)
   bv_at <- .mha_bias_accessor2(wv$bias, head_dim, num_kv)
 
-  wo_d <- dim(wo$kernel)
-  if (length(wo_d) == 3L && wo_d[1L] == num_heads && wo_d[2L] == head_dim) {
-    wo_at <- function(h, dv, do_) wo$kernel[h, dv, do_]
-    C_out_w <- wo_d[3L]
-  } else if (length(wo_d) == 3L && wo_d[1L] == C_out && wo_d[2L] == num_heads) {
-    wo_at <- function(h, dv, do_) wo$kernel[do_, h, dv]
-    C_out_w <- wo_d[1L]
-  } else {
-    cli::cli_abort(
-      "GQA {.val {lname}}: output kernel dims ({paste(wo_d, collapse='x')}) unrecognised."
-    )
-  }
+  wo_resolved <- .mha_resolve_output_kernel(
+    wo,
+    num_heads,
+    head_dim,
+    C_out,
+    lname,
+    layer_abbr = "GQA"
+  )
+  wo_at <- wo_resolved$wo_at
+  C_out_w <- wo_resolved$C_out_w
   bo_at <- .mha_output_bias_at(wo)
 
-  q_at <- function(t, c) backtick(q_exprs[(t - 1L) * C_in + c])
-  kv_at <- function(t, c) backtick(kv_exprs[(t - 1L) * C_in + c])
+  q_at <- .mha_input_accessor(q_exprs, C_in)
+  kv_at <- .mha_input_accessor(kv_exprs, C_in)
 
   # Q / K / V projections via shared helper (model-keras-mha-gqa-projections.R)
   q_proj <- .gqa_linear_project(

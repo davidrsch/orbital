@@ -164,16 +164,20 @@
     cli::cli_abort(c(
       "Unsupported layer type in Keras Functional model: {.cls {cls_orig}}.",
       "i" = paste(
-        "orbital supports: Dense, EinsumDense, Add, Concatenate, BatchNormalization,",
+        "orbital supports: Input, Dense, EinsumDense, Add, Multiply, Maximum, Minimum, Dot,",
+        "Concatenate, BatchNormalization,",
         "LayerNormalization, InstanceNormalization, GroupNormalization,",
-        "RMSNormalization, PReLU, GlobalAveragePooling1D, GlobalMaxPooling1D,",
+        "RMSNormalization, PReLU, LeakyReLU, ELU, ReLU, GlobalAveragePooling1D, GlobalMaxPooling1D,",
         "AdaptiveAveragePooling1D, AdaptiveMaxPooling1D,",
         "AveragePooling1D, MaxPooling1D, GlobalSumPooling1D,",
-        "Conv1D, ConvLSTM1D, LSTM, GRU, Bidirectional(LSTM/GRU), SimpleRNN,",
-        "UnitNormalization, ZeroPadding1D, Embedding, TimeDistributed(Dense),",
+        "Conv1D, Conv1DTranspose, DepthwiseConv1D, SeparableConv1D,",
+        "ConvLSTM1D, LSTM, GRU, Bidirectional(LSTM/GRU), SimpleRNN,",
+        "UnitNormalization, ZeroPadding1D, Cropping1D, RepeatVector, Permute,",
+        "Embedding, TimeDistributed(Dense),",
         "GroupedQueryAttention, MultiHeadAttention, Attention, AdditiveAttention, Subtract,",
-        "UpSampling1D, Dropout, SpatialDropout1D, GaussianDropout,",
-        "AlphaDropout, Flatten, Reshape, Activation, Softmax, Rescaling."
+        "UpSampling1D, Dropout, SpatialDropout1D, GaussianDropout, GaussianNoise,",
+        "AlphaDropout, Masking, Flatten, Reshape, Activation, Softmax,",
+        "Normalization, CategoryEncoding, IntegerLookup, Rescaling."
       ),
       "i" = "Please file an issue: {.url https://github.com/davidrsch/orbital/issues/14}"
     ))

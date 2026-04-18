@@ -1,4 +1,4 @@
-﻿# Handler functions for local/adaptive 1-D pooling and spatial layers.
+# Handler functions for local/adaptive 1-D pooling and spatial layers.
 # (AdaptiveAveragePooling1D, AveragePooling1D, AdaptiveMaxPooling1D,
 #  MaxPooling1D, ZeroPadding1D, Cropping1D).
 # Called by orbital_keras_dag_impl() in model-keras-dag.R.

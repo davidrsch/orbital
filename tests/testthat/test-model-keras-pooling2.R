@@ -1,4 +1,4 @@
-﻿# Integration tests for keras3 pooling: ZeroPadding1D, Cropping1D, padding=same, UpSampling1D, Adaptive variants.
+# Integration tests for keras3 pooling: ZeroPadding1D, Cropping1D, padding=same, UpSampling1D, Adaptive variants.
 # These tests are skipped when required packages are not installed.
 
 test_that("keras3 ZeroPadding1D predictions match keras3 predict", {

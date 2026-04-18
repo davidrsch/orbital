@@ -48,123 +48,74 @@
   invisible(NULL)
 }
 
-
-.k3_add <- function(
-  l,
-  lname,
-  topo_map,
-  expr_reg,
-  state,
-  weight_map,
-  output_layer_names,
-  last_dense
-) {
-  # Element-wise Add: supports skip / residual connections (>=2 inputs)
-  .k3_elementwise_merge(
+# Factory: produce a .k3_* handler for an element-wise merge layer
+# whose output is a scalar combination of one term per input.
+.k3_make_elementwise_merge_handler <- function(layer_type, expr_fn) {
+  force(layer_type)
+  force(expr_fn)
+  function(
+    l,
     lname,
     topo_map,
     expr_reg,
     state,
-    "Add",
-    function(terms) paste0("(", paste(terms, collapse = " + "), ")")
-  )
+    weight_map,
+    output_layer_names,
+    last_dense
+  ) {
+    .k3_elementwise_merge(
+      lname,
+      topo_map,
+      expr_reg,
+      state,
+      layer_type,
+      expr_fn
+    )
+  }
 }
 
+# Table-driven declaration of element-wise merge handlers.
+# Each row maps a Keras layer class to the combining expression.
+.k3_elementwise_merge_specs <- list(
+  Add = function(terms) paste0("(", paste(terms, collapse = " + "), ")"),
+  Multiply = function(terms) paste0("(", paste(terms, collapse = " * "), ")"),
+  Average = function(terms) {
+    paste0(
+      "((",
+      paste(terms, collapse = " + "),
+      ") / ",
+      format_numeric(length(terms)),
+      ")"
+    )
+  },
+  Maximum = function(terms) {
+    paste0("pmax(", paste(terms, collapse = ", "), ")")
+  },
+  Minimum = function(terms) {
+    paste0("pmin(", paste(terms, collapse = ", "), ")")
+  }
+)
 
-.k3_multiply <- function(
-  l,
-  lname,
-  topo_map,
-  expr_reg,
-  state,
-  weight_map,
-  output_layer_names,
-  last_dense
-) {
-  # Element-wise Multiply: element-wise product of >=2 inputs
-  .k3_elementwise_merge(
-    lname,
-    topo_map,
-    expr_reg,
-    state,
-    "Multiply",
-    function(terms) paste0("(", paste(terms, collapse = " * "), ")")
-  )
-}
-
-
-.k3_average <- function(
-  l,
-  lname,
-  topo_map,
-  expr_reg,
-  state,
-  weight_map,
-  output_layer_names,
-  last_dense
-) {
-  # Element-wise Average: mean of >=2 inputs
-  .k3_elementwise_merge(
-    lname,
-    topo_map,
-    expr_reg,
-    state,
-    "Average",
-    function(terms) {
-      paste0(
-        "((",
-        paste(terms, collapse = " + "),
-        ") / ",
-        format_numeric(length(terms)),
-        ")"
-      )
-    }
-  )
-}
-
-
-.k3_maximum <- function(
-  l,
-  lname,
-  topo_map,
-  expr_reg,
-  state,
-  weight_map,
-  output_layer_names,
-  last_dense
-) {
-  # Element-wise Maximum: per-element max over >=2 inputs
-  .k3_elementwise_merge(
-    lname,
-    topo_map,
-    expr_reg,
-    state,
-    "Maximum",
-    function(terms) paste0("pmax(", paste(terms, collapse = ", "), ")")
-  )
-}
-
-
-.k3_minimum <- function(
-  l,
-  lname,
-  topo_map,
-  expr_reg,
-  state,
-  weight_map,
-  output_layer_names,
-  last_dense
-) {
-  # Element-wise Minimum: per-element min over >=2 inputs
-  .k3_elementwise_merge(
-    lname,
-    topo_map,
-    expr_reg,
-    state,
-    "Minimum",
-    function(terms) paste0("pmin(", paste(terms, collapse = ", "), ")")
-  )
-}
+.k3_add <- .k3_make_elementwise_merge_handler(
+  "Add",
+  .k3_elementwise_merge_specs$Add
+)
+.k3_multiply <- .k3_make_elementwise_merge_handler(
+  "Multiply",
+  .k3_elementwise_merge_specs$Multiply
+)
+.k3_average <- .k3_make_elementwise_merge_handler(
+  "Average",
+  .k3_elementwise_merge_specs$Average
+)
+.k3_maximum <- .k3_make_elementwise_merge_handler(
+  "Maximum",
+  .k3_elementwise_merge_specs$Maximum
+)
+.k3_minimum <- .k3_make_elementwise_merge_handler(
+  "Minimum",
+  .k3_elementwise_merge_specs$Minimum
+)
 
 
 .k3_subtract <- function(

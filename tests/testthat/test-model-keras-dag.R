@@ -1,4 +1,4 @@
-﻿# Integration tests for keras3 Functional DAG models: activation layers.
+# Integration tests for keras3 Functional DAG models: activation layers.
 # Multi-output + Softmax/ELU -> test-model-keras-dag-softmax.R
 # Softmax stability + celu/hardtanh/log_sigmoid -> test-model-keras-dag-activations2.R
 # Structural layers (Add/Dropout/Flatten etc.) -> test-model-keras-dag-structural.R

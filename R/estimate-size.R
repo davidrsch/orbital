@@ -70,6 +70,124 @@ estimate_orbital_size.default <- function(x, ...) {
   )
 }
 
+# ---------------------------------------------------------------------------
+# Shared helpers used by the per-model files (estimate-size-trees.R,
+# estimate-size-linear.R) and the workflow / recipe / tailor wrappers
+# (estimate-size-workflow.R). Kept here so every split file has a single
+# source of truth.
+# ---------------------------------------------------------------------------
+
+#' Empirically-derived character estimate for a tree ensemble.
+#'
+#' Formula derived from empirical analysis of `dplyr::if_else()` expressions:
+#' - Each tree adds ~16 chars base overhead
+#' - Each internal node adds ~58 chars + feature name length
+#' - Tree combination adds ~5 chars per tree for " + " and parentheses
+#' - Base score addition adds ~25 chars
+#'
+#' @param n_trees Number of trees in the ensemble.
+#' @param n_internal Total number of internal (non-leaf) nodes.
+#' @param avg_feature_len Average number of characters in a feature name.
+#' @returns Integer estimate of total character count.
+#' @keywords internal
+#' @noRd
+estimate_tree_chars <- function(n_trees, n_internal, avg_feature_len) {
+  tree_chars <- 16 * n_trees + n_internal * (58 + avg_feature_len)
+  combination_overhead <- 5 * n_trees
+  base_overhead <- 25
+  as.integer(tree_chars + combination_overhead + base_overhead)
+}
+
+#' Empirically-derived character estimate for a linear model.
+#'
+#' Formula derived from empirical analysis:
+#' - Intercept adds ~20 chars
+#' - Each coefficient term `(feature * coef) +` adds ~29 chars
+#'   plus the feature name length
+#'
+#' @param n_coefs Total number of coefficients (including intercept).
+#' @param avg_feature_len Average number of characters in a feature name.
+#' @returns Integer estimate of total character count.
+#' @keywords internal
+#' @noRd
+estimate_linear_chars <- function(n_coefs, avg_feature_len) {
+  intercept_chars <- 20
+  # n_coefs includes intercept, so we have (n_coefs - 1) feature terms
+  feature_terms <- (n_coefs - 1) * (29 + avg_feature_len)
+  as.integer(intercept_chars + feature_terms)
+}
+#' Estimate orbital expression character count
+#'
+#' Estimates the character count of the orbital expression that would be
+#' generated for a model, without actually generating it. This is useful during
+#' hyperparameter tuning when you want to track SQL size as a metric but don't
+#' want to pay the cost of generating the full orbital object for every
+#' candidate model.
+#'
+#' @param x A fitted model object, workflow, prepped recipe, or fitted tailor.
+#' @param ... Additional arguments passed to methods.
+#' @param penalty For glmnet models, the penalty value (lambda) to use. If the
+#'   model was fit with a single lambda, this is used by default. Otherwise,
+#'   you must specify a value.
+#'
+#' @returns An integer estimate of the total character count of the orbital
+#'   expression.
+#'
+#' @details
+#' The estimation uses model metadata (tree structure, number of parameters,
+#' feature names) to approximate the size of the resulting orbital expression.
+#' The estimates are typically within 5-10% of the actual size.
+#'
+#' For tree-based models, this function is much faster than generating the full
+#' orbital object because it only needs to inspect the tree structure, not
+#' convert each tree to an R expression.
+#'
+#' This function aims to support all the same models and preprocessing
+#' operations as [orbital()]. If you find a case where `orbital()` works but
+#' `estimate_orbital_size()` does not, please
+#' [file an issue](https://github.com/tidymodels/orbital/issues).
+#'
+#' @seealso [orbital()] for generating orbital objects.
+#'
+#' @examplesIf rlang::is_installed("xgboost")
+#' library(xgboost)
+#'
+#' # Estimate size for an xgboost model
+#' x <- as.matrix(mtcars[, -1])
+#' y <- mtcars[, 1]
+#' model <- xgboost(x = x, y = y, nrounds = 50, max_depth = 4, verbosity = 0)
+#'
+#' estimate_orbital_size(model)
+#'
+#' @examplesIf rlang::is_installed(c("recipes", "workflows", "parsnip"))
+#' library(recipes)
+#' library(workflows)
+#' library(parsnip)
+#'
+#' # Estimate size for a workflow
+#' rec <- recipe(mpg ~ ., data = mtcars) |>
+#'   step_normalize(all_numeric_predictors())
+#'
+#' wf <- workflow() |>
+#'   add_recipe(rec) |>
+#'   add_model(linear_reg()) |>
+#'   fit(mtcars)
+#'
+#' estimate_orbital_size(wf)
+#'
+#' @export
+estimate_orbital_size <- function(x, ...) {
+  UseMethod("estimate_orbital_size")
+}
+
+#' @export
+estimate_orbital_size.default <- function(x, ...) {
+  cli::cli_abort(
+    "{.fn estimate_orbital_size} is not implemented for
+    {.obj_type_friendly {x}}."
+  )
+}
+
 # Shared helper for tree-based models
 # Formula derived from empirical analysis of dplyr::if_else() expressions:
 # - Each tree adds ~16 chars base overhead

@@ -2,10 +2,16 @@
 # Used by model-nnet.R, model-brulee.R, model-keras.R, model-h2o.R
 # kerasnip dispatch (unwrapping list fit slot) is handled in parsnip.R
 
-# Build an inline dplyr/SQL-portable expression string for erf(z_expr).
-# Uses the Abramowitz & Stegun (1964) §7.1.28 polynomial approximation;
-# maximum absolute error < 1.5e-7.
-# This mirrors the Python orbital._erf_approx() helper in erf.py.
+#' Inline `erf(z_expr)` approximation for SQL/dplyr translation.
+#'
+#' Uses the Abramowitz & Stegun (1964) §7.1.28 polynomial approximation;
+#' maximum absolute error < 1.5e-7. Mirrors the Python
+#' `orbital._erf_approx()` helper in `erf.py`.
+#'
+#' @param z_expr A SQL/dplyr expression (string) representing the argument.
+#' @return A character expression for `erf(z_expr)`.
+#' @keywords internal
+#' @noRd
 .erf_approx_expr <- function(z_expr) {
   t <- glue::glue("(1.0 / (1.0 + 0.3275911 * abs({z_expr})))")
   poly <- glue::glue(
@@ -20,17 +26,31 @@
   )
 }
 
-# Build an inline expression for GELU using the exact erf form:
-# gelu(x) = x * 0.5 * (1 + erf(x / sqrt(2)))
-# where 1/sqrt(2) = 0.7071067811865476.
+#' Inline exact-form GELU expression.
+#'
+#' Uses `gelu(x) = x * 0.5 * (1 + erf(x / sqrt(2)))` with `1/sqrt(2) ≈ 0.7071067811865476`.
+#'
+#' @param x_expr A SQL/dplyr expression (string).
+#' @return A character expression for the exact GELU.
+#' @keywords internal
+#' @noRd
 .gelu_exact_expr <- function(x_expr) {
   z <- glue::glue("({x_expr}) * 0.7071067811865476")
   erf_z <- .erf_approx_expr(z)
   glue::glue("({x_expr}) * 0.5 * (1.0 + ({erf_z}))")
 }
 
-# Resolve per-unit activation slope, warning when not found.
-# Used by elu, celu, prelu, leaky_relu, and threshold branches of activation_expr().
+#' Resolve a per-unit activation slope, warning when not found.
+#'
+#' Used by ELU, CELU, PReLU, LeakyReLU, and Threshold branches of
+#' `activation_expr()`.
+#'
+#' @param alpha The supplied alpha (numeric or `NULL`).
+#' @param default Numeric default returned (with a warning) when `alpha` is `NULL`.
+#' @param activation_name Activation name (for warning context).
+#' @return A numeric scalar slope.
+#' @keywords internal
+#' @noRd
 .resolve_alpha <- function(alpha, default, activation_name) {
   if (is.null(alpha)) {
     cli::cli_warn(
@@ -292,8 +312,17 @@ softmax_hidden_exprs <- function(pre_act_exprs, unit_names, norm_col_name) {
   )
 }
 
-# Generate a vector of column names for an intermediate layer output.
-# Returns paste0("orbital_", layer_type, "_", lname, "_", suffix, seq_len(n)).
+#' Generate column names for an intermediate layer output.
+#'
+#' Returns `paste0("orbital_", layer_type, "_", lname, "_", suffix, seq_len(n))`.
+#'
+#' @param layer_type Short layer-family identifier (e.g. `"relu"`).
+#' @param lname Keras layer name.
+#' @param suffix Per-column suffix (typically `"h"`).
+#' @param n Number of columns.
+#' @return A character vector of length `n`.
+#' @keywords internal
+#' @noRd
 .orb_col_nms <- function(layer_type, lname, suffix, n) {
   paste0("orbital_", layer_type, "_", lname, "_", suffix, seq_len(n))
 }

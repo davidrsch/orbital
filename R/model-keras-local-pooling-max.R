@@ -1,4 +1,4 @@
-﻿.k3_adaptivemaxpooling1d <- function(
+.k3_adaptivemaxpooling1d <- function(
   l,
   lname,
   topo_map,
