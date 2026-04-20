@@ -88,3 +88,29 @@ test_that("Sequential Dense(use_bias=FALSE) + Dense produces correct predictions
   )
   expect_equal(preds_orb, preds_keras, tolerance = 1e-5)
 })
+
+# ---------------------------------------------------------------------------
+# Phase 9 addition (E5 / R-02): EinsumDense routes through its dedicated handler
+# ---------------------------------------------------------------------------
+
+test_that("R-02: EinsumDense layer routes to the EinsumDense handler and translates", {
+  skip_if_no_keras3()
+  k <- reticulate::import("keras")
+  inp <- k$Input(shape = list(3L))
+  x <- k$layers$EinsumDense("ab,bc->ac", output_shape = 4L, bias_axes = "c")(inp)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  feature_names <- c("x1", "x2", "x3")
+  # The routing check: orbital must not abort with "unsupported layer" for
+  # EinsumDense, and must produce an orbital object that predicts cleanly.
+  expect_no_error(
+    orb_obj <- orbital(model, mode = "regression", feature_names = feature_names)
+  )
+  df <- data.frame(x1 = c(0.1, 0.2), x2 = c(-0.3, 0.4), x3 = c(0.5, -0.6))
+  preds <- predict(orb_obj, df)
+  expect_named(preds, ".pred")
+  expect_type(preds$.pred, "double")
+})
+

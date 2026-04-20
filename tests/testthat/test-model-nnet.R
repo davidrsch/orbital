@@ -125,7 +125,7 @@ test_that("orbital.nnet() errors informatively for non-nnet objects (bag_mlp gua
   not_nnet <- structure(list(), class = "not_nnet")
   expect_error(
     orbital:::orbital.nnet(not_nnet),
-    regexp = "nnet backend requires a single"
+    regexp = "not a .*nnet|bag_mlp|extract_fit_engine"
   )
 })
 

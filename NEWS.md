@@ -1,5 +1,27 @@
 # orbital (development version)
 
+## New features
+
+- **brulee:** `mlp()` fits with `hidden_units = c(...)` of arbitrary length are now translated (previously aborted at 2 hidden layers). Per-layer activations are honoured via the `activation` argument as a vector or scalar (recycled). (#B-01)
+- **Keras 3:** `Attention(use_scale = TRUE)` and `MultiHeadAttention(use_causal_mask = TRUE)` are now supported. (#R-03)
+- **brulee / H2O:** additional activations supported — `sparse_sigmoid` and `sparse_plus` (column-wise) for brulee/Keras; `ExpRectifier` / `ExpRectifierWithDropout` for H2O. (#R-G5, #H-G1)
+- **Keras 3:** improved error messages for the still-unsupported `sparsemax` and `glu` activations.
+
+## Bug fixes
+
+- **H2O:** abort when `standardize = TRUE` but normalization vectors are missing from the fit object, instead of silently producing wrong predictions. (#H-01)
+- **nnet:** validate the weight-vector length before reading it; emit an informative error when passed a `bag_mlp` object pointing users at `parsnip::extract_fit_engine()`. (#N-01, #N-02)
+- **H2O:** warn when `@parameters$activation` is `NULL` so the silent `Rectifier` default cannot mask a corrupted model. (#H-02)
+- **Keras 3:** explicit guard against `EinsumDense` layers misrouting to the linear `Sequential` dispatch path. (#R-02)
+- **H2O:** narrow the weight-discovery `tryCatch` so genuine connection / auth / version errors are no longer silently swallowed as end-of-matrix signals. (#H-03)
+
+## Documentation
+
+- Corrected the `keras3-models.Rmd` supported-layers table to reflect current support for `LSTM`, `GRU`, `Conv1D`, `Attention`, `AdditiveAttention`, and `MultiHeadAttention`. (#R-01)
+- Documented nnet backend scope (single hidden layer, `skip`, `linout`, `softmax`, `censored`, `bag_mlp`) and Keras `Embedding` / `Reshape` behaviour in the supported-models vignette. (#N-04, #N-05, #R-05, #R-06)
+- Documented H2O `standardize = TRUE` best practice and multiclass `lvl` ordering in the `orbital.H2ODeepLearningModel` roxygen section. (#H-05)
+- Documented the full brulee activation vocabulary and deep-MLP support in the `orbital.brulee_mlp` roxygen section. (#B-04)
+
 - `estimate_orbital_size()` is a new function that quickly estimates the character count of the orbital expression for a model without generating it. (#144)
 
 - `step_dummy()` and `step_indicate_na()` now generate SQL compatible with Snowflake and other databases that don't support casting booleans directly to numeric types. (#145)

@@ -36,14 +36,7 @@
     error = function(e) FALSE
   )
   aa_scale <- if (isTRUE(use_scale_aa)) {
-    wts_aa <- l$get_weights()
-    if (length(wts_aa) < 1L) {
-      cli::cli_abort(c(
-        "Keras AdditiveAttention layer {.val {lname}}: use_scale = TRUE but no scale weight was exported.",
-        i = "Expected at least 1 weight tensor; got {length(wts_aa)}.",
-        i = "Rebuild / retrain the model so the additive-attention scale is materialised."
-      ))
-    }
+    wts_aa <- .k3_get_weights(l, lname, required = 1L, names = "scale")
     as.numeric(wts_aa[[1L]])[1L]
   } else {
     1.0

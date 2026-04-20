@@ -70,12 +70,18 @@ activation_expr <- function(
   layer_class = NULL,
   default_value = 0
 ) {
-  switch(activation,
+  switch(
+    activation,
     "linear" = as.character(x_expr),
     "relu" = ,
     "Rectifier" = ,
     "RectifierWithDropout" = glue::glue(
       "dplyr::if_else({x_expr} > 0, {x_expr}, 0)"
+    ),
+    # H2O ExpRectifier: f(x) = x if x >= 0 else exp(x) - 1 (equivalent to ELU, alpha = 1)
+    "ExpRectifier" = ,
+    "ExpRectifierWithDropout" = glue::glue(
+      "dplyr::if_else({x_expr} >= 0, {x_expr}, exp({x_expr}) - 1)"
     ),
     "Sigmoid" = ,
     "sigmoid" = glue::glue("1 / (1 + exp(-({x_expr})))"),
@@ -228,19 +234,34 @@ activation_expr <- function(
         "i" = paste(
           "sparsemax normalises across all units simultaneously",
           "(projects each row onto the probability simplex).",
-          "It requires structural handling similar to softmax."
+          "It requires structural handling similar to softmax and is not",
+          "yet implemented on the DAG path; see the orbital remediation roadmap."
         )
       )
     ),
     "glu" = cli::cli_abort(c(
       "Activation {.val glu} cannot be applied as a per-unit scalar expression.",
-      "i" = "GLU splits the last dimension and applies element-wise gating; it requires structural handling."
+      "i" = paste(
+        "GLU splits the last feature dimension in half and multiplies the two",
+        "halves element-wise (a * sigmoid(b)); column-wise per-feature is not",
+        "well-defined for a single scalar. It requires structural handling",
+        "similar to softmax and is on the orbital remediation roadmap."
+      )
     )),
-    "sparse_sigmoid" = cli::cli_abort(
-      "Activation {.val sparse_sigmoid} is not supported by orbital."
+    # Keras 3 sparse_sigmoid: piecewise-linear sigmoid approximation
+    #   f(x) = max(0, min(1, 0.5 * x + 0.5))
+    "sparse_sigmoid" = glue::glue(
+      "dplyr::if_else({x_expr} <= -1, 0,",
+      " dplyr::if_else({x_expr} >= 1, 1, 0.5 * {x_expr} + 0.5))"
     ),
-    "sparse_plus" = cli::cli_abort(
-      "Activation {.val sparse_plus} is not supported by orbital."
+    # Keras 3 sparse_plus: smooth ReLU-like
+    #   f(x) = 0               if x < -1
+    #        = (x + 1)^2 / 4   if -1 <= x <= 1
+    #        = x               if x > 1
+    "sparse_plus" = glue::glue(
+      "dplyr::if_else({x_expr} < -1, 0,",
+      " dplyr::if_else({x_expr} > 1, {x_expr},",
+      " (({x_expr}) + 1) * (({x_expr}) + 1) / 4))"
     ),
     cli::cli_abort(
       "Activation function {.val {activation}} is not supported by orbital."

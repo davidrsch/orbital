@@ -377,3 +377,70 @@ test_that("brulee: missing fc.weight raises a clear error (finding D-04)", {
     regexp = "fc1\\.weight"
   )
 })
+
+# ---------------------------------------------------------------------------
+# Phase 9 additions (E7, E8): B-02 activation coverage, B-03/B-01 deep MLP
+# ---------------------------------------------------------------------------
+
+# E7 / B-02: Five activations that brulee itself does not expose as string
+# choices (hardshrink, softshrink, tanhshrink, rrelu) or that are only
+# partially covered (log_sigmoid). We test them as unit-level round-trips
+# through orbital::activation_expr() rather than end-to-end brulee fits
+# because brulee's parsnip bridge rejects unknown activation strings.
+test_that("B-02: activation_expr produces non-empty SQL for hardshrink", {
+  expr <- orbital:::activation_expr("hardshrink", "z")
+  expect_type(expr, "character")
+  expect_true(nchar(expr) > 0L)
+  expect_match(expr, "z", fixed = TRUE)
+})
+
+test_that("B-02: activation_expr produces non-empty SQL for softshrink", {
+  expr <- orbital:::activation_expr("softshrink", "z")
+  expect_type(expr, "character")
+  expect_true(nchar(expr) > 0L)
+  expect_match(expr, "z", fixed = TRUE)
+})
+
+test_that("B-02: activation_expr produces non-empty SQL for tanhshrink", {
+  expr <- orbital:::activation_expr("tanhshrink", "z")
+  expect_type(expr, "character")
+  expect_true(nchar(expr) > 0L)
+  expect_match(expr, "tanh", fixed = TRUE)
+})
+
+test_that("B-02: activation_expr produces non-empty SQL for log_sigmoid", {
+  expr <- orbital:::activation_expr("log_sigmoid", "z")
+  expect_type(expr, "character")
+  expect_true(nchar(expr) > 0L)
+  expect_match(expr, "log", fixed = TRUE)
+})
+
+test_that("B-02: activation_expr produces non-empty SQL for rrelu", {
+  expr <- orbital:::activation_expr("rrelu", "z")
+  expect_type(expr, "character")
+  expect_true(nchar(expr) > 0L)
+  # rrelu at inference uses the fixed midpoint negative slope
+  # (1/3 + 1/8)/2 = 0.2291666... per the ann-helpers implementation.
+  expect_match(expr, "z", fixed = TRUE)
+})
+
+test_that("B-03/B-01: brulee_mlp with hidden_units = c(4, 3, 2) translates successfully", {
+  skip_if_not_installed("brulee")
+  skip_if_not_installed("parsnip")
+  skip_if(!torch::torch_is_installed(), "torch not installed")
+
+  x <- as.matrix(mtcars[, c("disp", "wt", "hp")])
+  y <- mtcars$mpg
+
+  set.seed(1)
+  fit <- brulee::brulee_mlp(
+    x = x,
+    y = y,
+    hidden_units = c(4L, 3L, 2L),
+    epochs = 5L,
+    verbose = FALSE
+  )
+
+  expect_no_error(orb_obj <- orbital(fit, mode = "regression"))
+  expect_s3_class(orb_obj, "orbital")
+})

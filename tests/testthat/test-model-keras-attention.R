@@ -223,9 +223,57 @@ test_that("keras3 MHA errors with orbital_mha_kernel_ambiguous when num_heads ==
   )
 })
 
-# ── Wave 1A regression: use_causal_mask=TRUE now aborts (not warns) ───────────
+# ── Wave 1A regression (superseded by R-03): use_causal_mask=TRUE is now
+#     supported for static sequence lengths. See the R-03 test below for the
+#     positive-path coverage that replaces this abort-expectation test.
 
-test_that("keras3 MultiHeadAttention with use_causal_mask=TRUE raises error (Wave 1A regression)", {
+# ---------------------------------------------------------------------------
+# Phase 9 additions (E10 / R-03): Attention(use_scale) + MHA(use_causal_mask)
+# ---------------------------------------------------------------------------
+
+test_that("R-03: keras3 Attention(use_scale = TRUE) translates successfully", {
+  skip_if_no_keras3()
+  k <- reticulate::import("keras")
+  T_len <- 4L
+  C_in <- 3L
+
+  inp <- k$Input(shape = list(T_len, C_in))
+  # use_scale = TRUE adds a learnable scalar multiplier on the dot-product
+  # scores. R/model-keras-dotproduct-attention.R must read this weight and
+  # multiply the scaled-dot-product output accordingly.
+  x <- k$layers$Attention(use_scale = TRUE)(list(inp, inp))
+  x <- k$layers$Flatten()(x)
+  out <- k$layers$Dense(1L)(x)
+  model <- k$Model(inputs = inp, outputs = out)
+  model$compile(optimizer = "adam", loss = "mse")
+
+  set.seed(42)
+  n_row <- 8L
+  x_flat <- matrix(
+    rnorm(n_row * T_len * C_in),
+    nrow = n_row,
+    ncol = T_len * C_in
+  )
+  x_3d <- array(x_flat, dim = c(n_row, T_len, C_in))
+  model$fit(x_3d, rnorm(n_row), epochs = 2L, verbose = 0L)
+
+  feature_names <- paste0("x", seq_len(T_len * C_in))
+  df <- as.data.frame(x_flat)
+  names(df) <- feature_names
+
+  expect_no_error(
+    orb_obj <- orbital(
+      model,
+      mode = "regression",
+      feature_names = feature_names
+    )
+  )
+  preds_orb <- predict(orb_obj, df)$.pred
+  preds_keras <- as.numeric(model$predict(x_3d, verbose = 0L))
+  expect_equal(preds_orb, preds_keras, tolerance = 1e-4)
+})
+
+test_that("R-03: keras3 MultiHeadAttention with use_causal_mask = TRUE translates (static seq lengths)", {
   skip_if_no_keras3()
   k <- reticulate::import("keras")
   T_len <- 4L
@@ -234,19 +282,33 @@ test_that("keras3 MultiHeadAttention with use_causal_mask=TRUE raises error (Wav
   key_dim <- 4L
 
   inp <- k$Input(shape = list(T_len, C_in))
-  x <- k$layers$MultiHeadAttention(
+  # use_causal_mask is read from the MHA layer config by the orbital
+  # translator. With static T_q / T_kv the mha-standard.R translator
+  # materialises the upper-triangular mask at translation time.
+  # NOTE: An earlier Wave 1A regression test above (line ~228) expected
+  # use_causal_mask = TRUE to abort; that test captured the pre-remediation
+  # behaviour. Phase 9 / R-03 verifies the post-remediation path.
+  mha <- k$layers$MultiHeadAttention(
     num_heads = num_heads,
     key_dim = key_dim,
     use_causal_mask = TRUE
-  )(inp, inp)
+  )
+  x <- mha(inp, inp)
   x <- k$layers$Flatten()(x)
   out <- k$layers$Dense(1L)(x)
   model <- k$Model(inputs = inp, outputs = out)
 
   feature_names <- paste0("x", seq_len(T_len * C_in))
-  # Wave 1A fix: cli_abort (not cli_warn) when use_causal_mask=TRUE
-  expect_error(
-    orbital(model, mode = "regression", feature_names = feature_names),
-    "use_causal_mask"
+  # Either the MHA layer accepts use_causal_mask as a constructor kwarg
+  # (and orbital translates successfully) or it does not (and the layer
+  # constructor itself aborts). We assert the translator does not abort
+  # when given a valid causal-masked MHA with static shapes.
+  expect_no_error(
+    orb_obj <- orbital(
+      model,
+      mode = "regression",
+      feature_names = feature_names
+    )
   )
+  expect_s3_class(orb_obj, "orbital")
 })

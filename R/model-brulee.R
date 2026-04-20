@@ -87,23 +87,28 @@ orbital_brulee_mlp_impl <- function(x, mode, type, lvl, prefix) {
   coef_obj <- stats::coef(x)
   input_names <- x$dims$features
   n_h_layers <- length(x$dims$h)
-  if (n_h_layers > 2L) {
-    cli::cli_abort(c(
-      "brulee MLP supports at most 2 hidden layers via orbital.",
-      "i" = "n_h_layers = {n_h_layers} exceeds the supported maximum of 2."
-    ))
-  }
 
-  # For brulee_mlp_two_layer, the second activation is stored under the separate
-  # key "activation_2" in x$parameters rather than as a length-2 vector.
-  activations <- if (n_h_layers > 1L) {
-    c(
-      x$parameters$activation,
-      x$parameters$activation_2 %||% x$parameters$activation
-    )
-  } else {
-    x$parameters$activation
-  }
+  # Build per-layer activation vector. brulee stores this in two shapes:
+  #   * scalar (default): applied to every hidden layer
+  #   * length-n_h_layers vector: already per-layer
+  # brulee_mlp_two_layer stores the second activation separately under
+  # "activation_2"; preserve backward compatibility with that layout.
+  activations <- local({
+    a1 <- x$parameters$activation
+    a2 <- x$parameters$activation_2
+    if (!is.null(a2) && n_h_layers == 2L) {
+      c(a1, a2)
+    } else if (length(a1) == 1L) {
+      rep_len(a1, n_h_layers)
+    } else if (length(a1) == n_h_layers) {
+      a1
+    } else {
+      cli::cli_abort(c(
+        "brulee activation parameter has unexpected length.",
+        "i" = "Got length {length(a1)}; expected 1 or {n_h_layers}."
+      ))
+    }
+  })
 
   alphas <- brulee_extract_alphas(x, activations, n_h_layers)
 
@@ -197,11 +202,19 @@ orbital_brulee_mlp_impl <- function(x, mode, type, lvl, prefix) {
 #' @rdname orbital
 #' @method orbital brulee_mlp
 #' @section brulee_mlp backend:
-#'   Supports up to 2 hidden layers. Activation alphas (`leaky_relu`, `elu`,
-#'   `celu`, `prelu`) are extracted from the live torch module when available,
-#'   with a warning-only fallback to parsnip / ONNX defaults when the torch
-#'   model cannot be probed. PReLU per-channel weights are honoured when
-#'   exported via [stats::coef()].
+#'   Supported activations (from `brulee::brulee_activations()`): `celu`,
+#'   `elu`, `gelu`, `hardshrink`, `hardsigmoid`, `hardtanh`, `leaky_relu`,
+#'   `linear`, `log_sigmoid`, `relu`, `relu6`, `rrelu`, `selu`, `sigmoid`,
+#'   `silu`, `softplus`, `softshrink`, `softsign`, `tanh`, `tanhshrink`.
+#'
+#'   Deep brulee MLPs with `n_h_layers > 2` are supported as of this release;
+#'   per-layer activations use the `activation` argument as a vector or scalar
+#'   (recycled).
+#'
+#'   Activation alphas (`leaky_relu`, `elu`, `celu`, `prelu`) are extracted
+#'   from the live torch module when available, with a warning-only fallback
+#'   to parsnip / ONNX defaults when the torch model cannot be probed. PReLU
+#'   per-channel weights are honoured when exported via [stats::coef()].
 #' @export
 orbital.brulee_mlp <- function(
   x,

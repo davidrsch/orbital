@@ -9,7 +9,7 @@
   last_dense
 ) {
   # MultiHeadAttention: scaled dot-product self-attention or cross-attention.
-  # Supports: fixed-length sequences; causal_mask = FALSE; use_bias = TRUE/FALSE.
+  # Supports: fixed-length sequences; use_causal_mask TRUE/FALSE; use_bias TRUE/FALSE.
   # Input layout: time-step major (T × C_in) flat vector.
   # Weight extraction via reticulate::py_get_attr on internal EinsumDense sub-layers.
   inbound <- topo_map[[lname]]
@@ -47,17 +47,26 @@
     )
   }
 
-  # Causal-mask limitation: use_causal_mask cannot be expressed as a static
-  # SQL expression; abort immediately to prevent silent incorrect predictions.
+  # Causal mask: with static T_q / T_kv we can materialise the upper-triangular
+  # mask at translation time. For each query position q, restrict attention to
+  # key positions k <= q (i.e. mask[q, k] = FALSE when k > q, equivalent to
+  # adding -inf to the score before softmax, which means exp(-inf)=0 drops the
+  # term out of both the softmax numerator and denominator).
   cfg_main <- .k3_safe_get_config(l, lname)
-  if (isTRUE(as.logical(cfg_main$use_causal_mask %||% FALSE))) {
-    cli::cli_abort(
-      paste0(
-        "MultiHeadAttention layer has `use_causal_mask = TRUE`: causal masking ",
-        "cannot be expressed as a static SQL expression. Refactor the model to ",
-        "remove causal masking before calling orbital()."
-      )
-    )
+  use_causal_mask <- isTRUE(as.logical(cfg_main$use_causal_mask %||% FALSE))
+  if (use_causal_mask) {
+    if (!is.finite(T_q) || T_q < 1L || !is.finite(T_kv) || T_kv < 1L) {
+      cli::cli_abort(c(
+        "MultiHeadAttention layer {.val {lname}}: {.code use_causal_mask = TRUE} requires static sequence lengths.",
+        "x" = "Got T_q = {T_q}, T_kv = {T_kv}.",
+        "i" = "Rebuild the model with explicit (non-None) sequence lengths on the query and key/value inputs."
+      ))
+    }
+  }
+  # Valid key indices per query (1-based). For non-causal: all keys; for
+  # causal: keys up to and including the query position.
+  causal_keys <- function(q) {
+    if (use_causal_mask) seq_len(min(q, T_kv)) else seq_len(T_kv)
   }
 
   # Resolve the shared Q/K/V kernel layouts via the common helper.
@@ -210,9 +219,11 @@
   attn_nm <- array(NA_character_, dim = c(T_q, T_kv, num_heads))
   for (q in seq_len(T_q)) {
     for (h in seq_len(num_heads)) {
-      # Collect raw scaled score expressions for all key positions
-      score_exprs <- character(T_kv)
-      for (k in seq_len(T_kv)) {
+      ks <- causal_keys(q)
+      # Collect raw scaled score expressions for valid key positions only.
+      score_exprs <- character(length(ks))
+      for (ki in seq_along(ks)) {
+        k <- ks[ki]
         dot_terms <- vapply(
           seq_len(key_dim),
           function(d) {
@@ -220,7 +231,7 @@
           },
           character(1L)
         )
-        score_exprs[k] <- paste0(
+        score_exprs[ki] <- paste0(
           "((",
           paste(dot_terms, collapse = " + "),
           ") * ",
@@ -241,8 +252,9 @@
         )
       )
 
-      exp_nms <- character(T_kv)
-      for (k in seq_len(T_kv)) {
+      exp_nms <- character(length(ks))
+      for (ki in seq_along(ks)) {
+        k <- ks[ki]
         exp_nm <- paste0(
           "orbital_mha_",
           lname,
@@ -256,9 +268,9 @@
         mha_nms <- c(mha_nms, exp_nm)
         mha_exprs <- c(
           mha_exprs,
-          paste0("exp(", score_exprs[k], " - `", max_nm, "`)")
+          paste0("exp(", score_exprs[ki], " - `", max_nm, "`)")
         )
-        exp_nms[k] <- exp_nm
+        exp_nms[ki] <- exp_nm
       }
       sumexp_nm <- paste0("orbital_mha_", lname, "_sumexp_q", q, "_h", h)
       mha_nms <- c(mha_nms, sumexp_nm)
@@ -266,7 +278,8 @@
         mha_exprs,
         paste0("(", paste(backtick(exp_nms), collapse = " + "), ")")
       )
-      for (k in seq_len(T_kv)) {
+      for (ki in seq_along(ks)) {
+        k <- ks[ki]
         a_nm <- paste0(
           "orbital_mha_",
           lname,
@@ -280,7 +293,7 @@
         mha_nms <- c(mha_nms, a_nm)
         mha_exprs <- c(
           mha_exprs,
-          paste0("(", backtick(exp_nms[k]), " / ", backtick(sumexp_nm), ")")
+          paste0("(", backtick(exp_nms[ki]), " / ", backtick(sumexp_nm), ")")
         )
         attn_nm[q, k, h] <- a_nm
       }
@@ -288,12 +301,14 @@
   }
 
   # Head outputs: head[q, h, d_v] = sum_k attn[q,k,h] * V[k,h,d_v]
+  # Under causal masking, only sum over keys k <= q (other terms are 0).
   hout_nm <- array(NA_character_, dim = c(T_q, num_heads, value_dim))
   for (q in seq_len(T_q)) {
+    ks <- causal_keys(q)
     for (h in seq_len(num_heads)) {
       for (d_v in seq_len(value_dim)) {
         terms <- vapply(
-          seq_len(T_kv),
+          ks,
           function(k) {
             paste0(
               backtick(attn_nm[q, k, h]),

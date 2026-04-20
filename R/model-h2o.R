@@ -1,22 +1,21 @@
 # orbital method for H2O DeepLearning models (agua package)
 
 orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
-  # Count weight matrices by iterating until h2o.weights() errors
-  n_matrices <- 0L
-  repeat {
-    res <- tryCatch(
-      h2o::h2o.weights(x, matrix_id = n_matrices + 1L),
-      error = function(e) NULL
-    )
-    if (is.null(res)) {
-      break
-    }
-    n_matrices <- n_matrices + 1L
-  }
+  # --------------------------------------------------------------------------
+  # Parameter-level validation runs first so that user-facing configuration
+  # problems surface before we attempt any network round-trips to the H2O
+  # cluster. These guards do not depend on the weight matrices.
+  # --------------------------------------------------------------------------
 
   # Activation for all hidden layers (dropout variants behave identically at inference)
   activation <- x@parameters$activation
   if (is.null(activation)) {
+    cli::cli_warn(c(
+      "H2O model {.code @parameters$activation} is NULL; falling back to {.val Rectifier}.",
+      "i" = "A NULL activation may indicate a corrupted model object or an H2O version change.",
+      "i" = "If the original fit used a different activation, predictions will be silently wrong.",
+      "i" = "Verify with {.code x@allparameters$activation} or refit the model."
+    ))
     activation <- "Rectifier"
   }
 
@@ -54,6 +53,15 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
       "H2O model normalisation vectors are inconsistent; the model may be corrupted."
     )
   }
+  if (
+    isTRUE(x@parameters$standardize) && is.null(norm_sub) && is.null(norm_mul)
+  ) {
+    cli::cli_abort(c(
+      "H2O model has {.code standardize = TRUE} but both normalisation vectors are missing.",
+      "i" = "The model object may be corrupted; refitting is recommended.",
+      "i" = "Without {.code input_norm_sub} and {.code input_norm_mul} orbital cannot reproduce H2O's internal standardisation and would return silently wrong predictions."
+    ))
+  }
   if (!is.null(norm_sub) && (!is.numeric(norm_sub) || anyNA(norm_sub))) {
     cli::cli_abort(
       "H2O {.code input_norm_sub} is not a finite numeric vector; the model may be corrupted."
@@ -63,6 +71,48 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
     cli::cli_abort(
       "H2O {.code input_norm_mul} is not a finite numeric vector; the model may be corrupted."
     )
+  }
+
+  # --------------------------------------------------------------------------
+  # Weight-matrix enumeration. Runs after parameter validation so that mock
+  # tests exercising parameter-level guards do not need to stub h2o.weights().
+  # --------------------------------------------------------------------------
+  # Count weight matrices by iterating until h2o.weights() errors.
+  # H2O signals "past the end" via an error message containing specific
+  # substrings; any other error (e.g. lost connection, auth, unsupported H2O
+  # version) must propagate rather than silently truncating the model.
+  n_matrices <- 0L
+  repeat {
+    res <- tryCatch(
+      h2o::h2o.weights(x, matrix_id = n_matrices + 1L),
+      error = function(e) {
+        msg <- conditionMessage(e)
+        if (
+          grepl(
+            "matrix_id|out of range|invalid|does not exist",
+            msg,
+            ignore.case = TRUE
+          )
+        ) {
+          return(NULL)
+        }
+        cli::cli_abort(
+          c(
+            "Failed to enumerate H2O weight matrices.",
+            "i" = "Matrix id {n_matrices + 1L} request returned: {msg}",
+            "i" = "This may indicate a lost H2O connection or an unsupported H2O version."
+          ),
+          parent = e
+        )
+      }
+    )
+    if (is.null(res)) {
+      break
+    }
+    n_matrices <- n_matrices + 1L
+  }
+  if (n_matrices == 0L) {
+    cli::cli_abort("H2O model has no weight matrices; cannot translate.")
   }
 
   all_exprs <- list()
@@ -212,14 +262,10 @@ orbital_h2o_dl_impl <- function(x, mode, type, lvl, prefix) {
     h2o_levels <- h2o_response_levels(x)
     if (is.null(h2o_levels)) {
       cli::cli_warn(c(
-        "H2O class-order verification skipped: response levels could not be \
-         extracted from the model object.",
-        i = "orbital will trust {.arg lvl} = {.val {lvl}} to be in H2O's \
-            alphabetical output order.",
-        i = "If this ordering is wrong, multi-class probability columns will \
-            be silently misaligned.",
-        i = "File an issue with your H2O version and {.code x@model$output} \
-            structure if you hit this."
+        "!" = "Could not read response factor levels from H2O model.",
+        "i" = "Probability columns will be named in the order of the user-supplied {.arg lvl} argument.",
+        "i" = "If {.arg lvl} was not supplied, column ordering may not match training; pass {.arg lvl = levels(train_y)} to be safe.",
+        "i" = "Recommended: call {.code h2o.predict(x, newdata_h2o)} on a sample and compare the column names to {.arg lvl}; any mismatch will silently misalign multi-class probability columns in orbital-translated SQL."
       ))
     } else {
       if (!setequal(as.character(lvl), as.character(h2o_levels))) {
@@ -287,6 +333,15 @@ h2o_response_levels <- function(x) {
 #'   accepted via the generic activation table but is not a standard H2O
 #'   choice; verify the fit path if your model reports it. Multi-output
 #'   regression is explicitly rejected.
+#'
+#'   Best practice: train with `standardize = TRUE` for numerically stable
+#'   SQL translation. When `standardize = TRUE` the normalization vectors
+#'   must be present in the fit object; orbital aborts if they are missing.
+#'
+#'   Multiclass probability ordering: pass `lvl = levels(train_y)` to
+#'   `orbital()` to ensure the emitted probability columns are ordered to
+#'   match the training factor levels. When `lvl` cannot be read back from
+#'   the H2O response domain, orbital emits a warning.
 #' @export
 orbital.H2ODeepLearningModel <- function(
   x,

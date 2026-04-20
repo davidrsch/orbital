@@ -1,3 +1,42 @@
+# Detect whether a nnet fit was produced with linout = TRUE.
+#
+# nnet::nnet() does not record the `linout` argument on the fit object
+# (only `entropy`, `softmax`, `censored` are stored). The user's call is
+# preserved at `fit$call$linout`, so we consult that first. Users who
+# manually mutate a fit object can also set `x$linout` directly.
+.nnet_linout <- function(x) {
+  if (isTRUE(x$linout)) {
+    return(TRUE)
+  }
+  call_linout <- x$call$linout
+  if (is.null(call_linout)) {
+    return(FALSE)
+  }
+  val <- tryCatch(
+    eval(call_linout, envir = parent.frame()),
+    error = function(cnd) FALSE
+  )
+  isTRUE(val)
+}
+
+# Detect whether a nnet fit was produced with skip = TRUE.
+# Like `linout`, `skip` is not stored on the fit object itself; we consult
+# `fit$call$skip` and an optional user-set `x$skip` attribute.
+.nnet_skip <- function(x) {
+  if (isTRUE(x$skip)) {
+    return(TRUE)
+  }
+  call_skip <- x$call$skip
+  if (is.null(call_skip)) {
+    return(FALSE)
+  }
+  val <- tryCatch(
+    eval(call_skip, envir = parent.frame()),
+    error = function(cnd) FALSE
+  )
+  isTRUE(val)
+}
+
 #' @rdname orbital
 #' @method orbital nnet
 #' @section nnet backend:
@@ -8,6 +47,9 @@
 #'   `softmax = TRUE` for multi-class. `censored = TRUE` is not supported.
 #'   `x$entropy` (loss-function flag) is intentionally ignored because it does
 #'   not affect inference-time outputs.
+#'
+#'   Bagged fits via `parsnip::bag_mlp(engine = "nnet")` are not supported;
+#'   use `parsnip::extract_fit_engine` on each constituent fit.
 #' @export
 orbital.nnet <- function(
   x,
@@ -22,16 +64,24 @@ orbital.nnet <- function(
 
   if (!inherits(x, "nnet")) {
     cli::cli_abort(c(
-      "{.fn orbital} for the {.pkg nnet} backend requires a single {.cls nnet} object.",
-      "i" = "Bagged models ({.code bag_mlp(engine = \"nnet\")}) are not yet supported."
+      "!" = "Object is not a {.cls nnet} fit.",
+      "i" = "Got an object of class {.cls {class(x)}}.",
+      "i" = "If this is a {.fn parsnip::bag_mlp} ensemble, use {.fn parsnip::extract_fit_engine} on each constituent fit.",
+      "i" = "Support for {.cls bag_mlp} directly is not yet implemented."
     ))
   }
 
-  if (isTRUE(x$skip)) {
+  if (.nnet_skip(x)) {
     cli::cli_abort(c(
       "{.fn orbital} does not support {.cls nnet} models fitted with {.code skip = TRUE}.",
-      "i" = "Skip connections change the weight vector layout in an unsupported way.",
-      "i" = "Re-fit the model with {.code skip = FALSE}."
+      "i" = paste(
+        "With {.code skip = TRUE} nnet adds direct input-to-output connections,",
+        "so each output unit has {.code n_h + n_in + 1} weights instead of",
+        "{.code n_h + 1} and the overall weight vector layout changes to",
+        "{.code n_h * (n_in + 1) + n_out * (n_h + n_in + 1)}."
+      ),
+      "i" = "This alternative layout is on the orbital remediation roadmap but not yet implemented.",
+      "i" = "Re-fit the model with {.code skip = FALSE} to use orbital today."
     ))
   }
 
@@ -50,8 +100,13 @@ orbital.nnet <- function(
   #   mode = "classification" : linout = FALSE, softmax = TRUE  for n_out > 1
   #                             (internal softmax, parsnip re-softmaxes)
   # Anything else is refused rather than silently miscompiled.
+  #
+  # Note: nnet::nnet() does NOT store `linout` on the returned fit object
+  # (only `entropy`, `softmax`, `censored`). The canonical signal for whether
+  # linout was set is `fit$call$linout`. Users can also override via the
+  # `linout` attribute set manually on the fit.
   # ----------------------------------------------------------------------------
-  linout <- isTRUE(x$linout)
+  linout <- .nnet_linout(x)
   softmax_flag <- isTRUE(x$softmax)
   censored <- isTRUE(x$censored)
   entropy <- isTRUE(x$entropy)
@@ -59,7 +114,16 @@ orbital.nnet <- function(
   if (censored) {
     cli::cli_abort(c(
       "{.fn orbital} does not support {.cls nnet} models fitted with {.code censored = TRUE}.",
-      "i" = "The censored multinomial output transform is not implemented."
+      "i" = paste(
+        "{.code censored = TRUE} switches nnet's multinomial output transform",
+        "to a variant that treats the final class as a 'none-of-the-above'",
+        "censoring category, yielding a different softmax-like normalisation."
+      ),
+      "i" = paste(
+        "Implementing this requires mirroring nnet's censored softmax exactly;",
+        "it is on the orbital remediation roadmap but not yet implemented."
+      ),
+      "i" = "Re-fit the model with {.code censored = FALSE} to use orbital today."
     ))
   }
 
@@ -118,6 +182,15 @@ orbital.nnet <- function(
   n_out <- x$n[3L]
 
   input_names <- x$coefnames
+
+  expected_wts_len <- n_h * (n_in + 1L) + n_out * (n_h + 1L)
+  if (length(x$wts) != expected_wts_len) {
+    cli::cli_abort(c(
+      "nnet fit weight vector has unexpected length.",
+      "i" = "Expected {expected_wts_len} weights ({n_h} hidden x ({n_in}+1) inputs + {n_out} outputs x ({n_h}+1) hidden), got {length(x$wts)}.",
+      "i" = "The fit object may be corrupted or produced by an incompatible nnet version."
+    ))
+  }
 
   # Build hidden layer weight matrix (n_h x n_in) and bias vector
   hidden_w <- matrix(0, nrow = n_h, ncol = n_in)

@@ -424,3 +424,100 @@ test_that("H2O input_norm_sub malformed aborts", {
     regexp = "input_norm_sub"
   )
 })
+
+# ---------------------------------------------------------------------------
+# Phase 9 additions (E1, E4, E11): H-01, H-02, H-03 mock-based guards
+# ---------------------------------------------------------------------------
+
+test_that("H-01: aborts when standardize = TRUE and norm vectors missing", {
+  # Regression test for finding H-01: with standardize = TRUE, orbital cannot
+  # reproduce H2O's internal standardisation without input_norm_sub /
+  # input_norm_mul, so predictions would be silently wrong. The check must
+  # abort rather than fall through.
+  mock <- methods::new(
+    "MockH2OModel",
+    parameters = list(
+      activation = "Rectifier",
+      standardize = TRUE
+    ),
+    allparameters = list(),
+    model = list(
+      input_norm_sub = NULL,
+      input_norm_mul = NULL,
+      output = list(names = character(), domains = list())
+    )
+  )
+  expect_error(
+    orbital_h2o_dl_impl(
+      mock,
+      mode = "regression",
+      type = "numeric",
+      lvl = NULL,
+      prefix = ".pred"
+    ),
+    regexp = "normali[sz]ation vectors"
+  )
+})
+
+test_that("H-02: NULL activation emits warning and falls back to Rectifier", {
+  # Regression test for finding H-02: when @parameters$activation is NULL,
+  # orbital warns the caller rather than silently using an arbitrary default.
+  mock <- methods::new(
+    "MockH2OModel",
+    parameters = list(activation = NULL, standardize = FALSE),
+    allparameters = list(),
+    model = list(
+      input_norm_sub = NULL,
+      input_norm_mul = NULL,
+      output = list(names = character(), domains = list())
+    )
+  )
+  expect_warning(
+    try(
+      orbital_h2o_dl_impl(
+        mock,
+        mode = "regression",
+        type = "numeric",
+        lvl = NULL,
+        prefix = ".pred"
+      ),
+      silent = TRUE
+    ),
+    regexp = "activation|Rectifier"
+  )
+})
+
+test_that("H-03: non-'not found' h2o.weights errors propagate with original message", {
+  # Regression test for finding H-03: a connection / auth failure inside
+  # h2o::h2o.weights() must NOT be silently treated as "end of matrices".
+  # orbital re-throws with a parent condition whose message contains the
+  # original error text (e.g. "Connection refused").
+  skip_if_not_installed("h2o")
+  skip_if_not_installed("testthat")
+
+  mock <- methods::new(
+    "MockH2OModel",
+    parameters = list(activation = "Rectifier", standardize = FALSE),
+    allparameters = list(),
+    model = list(
+      input_norm_sub = NULL,
+      input_norm_mul = NULL,
+      output = list(names = character(), domains = list())
+    )
+  )
+
+  testthat::local_mocked_bindings(
+    h2o.weights = function(...) stop("Connection refused"),
+    .package = "h2o"
+  )
+  expect_error(
+    orbital_h2o_dl_impl(
+      mock,
+      mode = "regression",
+      type = "numeric",
+      lvl = NULL,
+      prefix = ".pred"
+    ),
+    regexp = "Connection refused"
+  )
+})

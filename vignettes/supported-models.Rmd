@@ -185,6 +185,28 @@ that change the row count, are rejected with a clear error rather than
 silently misbehaving. This is by design: SQL rows are atomic, so spatial
 indexing across rows cannot be emitted.
 
+**Keras `Embedding`.** Embedding layers with `vocab_size > 50000` abort at
+translation time (the emitted `CASE` expression is impractical for SQL
+engines). Vocabularies in the 10000–50000 range emit a warning; consider
+pre-computing embeddings or reducing vocabulary size.
+
+**Keras `Reshape`.** A `Reshape` layer is treated as a no-op because SQL
+rows are atomic. The reshape must preserve the row count (total element
+count per row and the batch axis); reshapes that would redistribute
+elements across rows are rejected.
+
+### nnet backend — known scope and limitations
+
+- Single hidden layer only (upstream `nnet::nnet()` limit).
+- `skip = FALSE` is supported; `skip = TRUE` is not yet implemented
+  (the direct input-to-output weight layout is on the roadmap).
+- `linout = TRUE` is required for regression.
+- For multi-class classification, `softmax = TRUE` is required; `softmax = FALSE`
+  with more than one output unit is not supported.
+- `censored = TRUE` is not supported.
+- Bagged ensembles via `parsnip::bag_mlp(engine = "nnet")` are not supported;
+  use `parsnip::extract_fit_engine()` on each constituent fit.
+
 ## Recipes steps
 
 ```{r}

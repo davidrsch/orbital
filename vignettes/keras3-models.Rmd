@@ -76,10 +76,13 @@ translate.
 | `GlobalMaxPooling1D` | ✅ Supported | Row-wise max over all input features |
 | `InstanceNormalization` | ✅ Supported | Per-row mean and variance (same formula as LayerNorm) |
 | `GroupNormalization` | ✅ Supported | `num_groups=1` → LayerNorm; `num_groups=n_features` → per-feature |
-| `LSTM` / `GRU` / `RNN` | ❌ Not supported | Recurrent layers are not translatable to SQL |
-| `Conv1D` / `Conv2D` | ❌ Not supported | Requires spatial aggregation |
+| `LSTM` / `GRU` | ✅ Supported | Sequence length must be static (known at translation time); `RNN` cell class is not supported |
+| `Conv1D` | ✅ Supported | 1-D tabular scope only; `Conv2D` remains unsupported |
+| `Conv2D` | ❌ Not supported | Requires spatial aggregation |
 | `GlobalAveragePooling2D/3D` | ❌ Not supported | Requires spatial aggregation |
-| `Attention` / `MultiHeadAttention` | ❌ Not supported | |
+| `Attention` | ✅ Supported | `use_scale = TRUE` supported as of this release |
+| `AdditiveAttention` | ✅ Supported | Bahdanau-style additive scoring |
+| `MultiHeadAttention` | ✅ Supported | `use_causal_mask = TRUE` supported as of this release |
 
 ---
 

@@ -20,7 +20,7 @@
   if (!is.null(vocab_raw) && length(vocab_raw) > 0L) {
     vocab <- as.integer(unlist(vocab_raw))
   } else {
-    wts <- l$get_weights()
+    wts <- .k3_get_weights(l, lname, required = 1L, names = "vocabulary")
     vocab <- as.integer(wts[[1L]])
   }
   unit_names <- paste0(

@@ -103,6 +103,20 @@ orbital_keras_impl <- function(
     all_layers
   )
 
+  # Explicit positive detection for EinsumDense: force the DAG path even if
+  # nl_re regressed, since treating an EinsumDense as a plain Dense layer
+  # would silently miscompile to wrong predictions.
+  if (
+    any(grepl(
+      "einsumdense",
+      vapply(all_layers, function(l) class(l)[[1L]], character(1)),
+      ignore.case = TRUE
+    )) &&
+      length(non_linear_layers) == 0L
+  ) {
+    non_linear_layers <- all_layers
+  }
+
   if (length(non_linear_layers) > 0L) {
     return(
       orbital_keras_dag_impl(
@@ -115,6 +129,20 @@ orbital_keras_impl <- function(
         all_layers
       )
     )
+  }
+
+  # Belt-and-suspenders: after the non_linear_layers filter, assert that no
+  # EinsumDense layer survives into the linear sequential path. A regex
+  # regression in nl_re that removed "einsumdense" would silently misroute
+  # these layers as if they were plain Dense.
+  for (.layer in all_layers) {
+    .cls <- tolower(class(.layer)[1L])
+    if (grepl("einsumdense", .cls, perl = TRUE)) {
+      cli::cli_abort(c(
+        "Internal invariant violation: EinsumDense layer reached the linear sequential path.",
+        "i" = "This indicates a bug in orbital's layer-class regex; please report with the Keras model structure."
+      ))
+    }
   }
 
   # Linear model: optimised sequential traversal (no topology introspection needed)

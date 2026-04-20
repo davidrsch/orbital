@@ -50,6 +50,7 @@ articles:
   navbar: ~
   contents:
   - supported-models
+  - keras3-models
   - articles/pros-cons
 - title: SQL and deployment
   contents:

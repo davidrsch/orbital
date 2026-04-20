@@ -18,7 +18,12 @@
   # PReLU: per-channel learnable negative slope
   inbound <- topo_map[[lname]]
   in_exprs <- get(inbound[1L], envir = expr_reg, inherits = FALSE)
-  alpha_w <- as.numeric(unlist(l$get_weights()))
+  alpha_w <- as.numeric(unlist(.k3_get_weights(
+    l,
+    lname,
+    required = 1L,
+    names = "alpha"
+  )))
   unit_names <- paste0(
     "orbital_prelu_",
     lname,

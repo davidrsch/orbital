@@ -41,10 +41,24 @@
     as.logical(cfg_att$use_scale),
     error = function(e) FALSE
   )
-  if (isTRUE(use_scale_att) && length(l$get_weights()) > 0L) {
-    cli::cli_abort(
-      "Keras Attention layer {.val {lname}}: use_scale=TRUE is not yet supported."
-    )
+  scale_factor_expr <- NULL
+  if (isTRUE(use_scale_att)) {
+    att_wts <- tryCatch(l$get_weights(), error = function(e) list())
+    if (length(att_wts) >= 1L) {
+      sc <- as.numeric(att_wts[[1L]])
+      if (length(sc) != 1L || !is.finite(sc)) {
+        cli::cli_abort(c(
+          "Keras Attention layer {.val {lname}}: use_scale=TRUE weight has unexpected shape.",
+          "i" = "Expected a finite scalar; got length {length(sc)}."
+        ))
+      }
+      scale_factor_expr <- format_numeric(sc)
+    } else {
+      cli::cli_abort(c(
+        "Keras Attention layer {.val {lname}}: use_scale=TRUE but no weight found.",
+        "i" = "The layer may not have been built; rebuild with a concrete input shape."
+      ))
+    }
   }
 
   # Infer shapes from input sizes.  Both query and key must have same depth D.
@@ -125,11 +139,18 @@
         },
         character(1L)
       )
-      score_exprs[q_i, k_j] <- paste0(
-        "(",
-        paste(terms, collapse = " + "),
-        ")"
-      )
+      score_exprs[q_i, k_j] <- {
+        dot_expr <- paste0(
+          "(",
+          paste(terms, collapse = " + "),
+          ")"
+        )
+        if (is.null(scale_factor_expr)) {
+          dot_expr
+        } else {
+          paste0("(", dot_expr, " * ", scale_factor_expr, ")")
+        }
+      }
     }
   }
 
